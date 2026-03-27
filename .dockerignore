@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+apps/*/node_modules
+apps/*/dist
+apps/web/.next
+output
+research/screenshots/current
+research/screenshots/diff
+dev.err.log
+dev.out.log
+npm-debug.log*

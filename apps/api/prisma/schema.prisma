@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model User {
+  id              String         @id @default(cuid())
+  email           String?        @unique
+  phone           String?        @unique
+  password        String?
+  inviteCode      String?        @unique
+  role            UserRole       @default(USER)
+  points          Int            @default(0)
+  agentPoints     Int            @default(0)
+  dailyDetectUsed Int            @default(0)
+  lastCheckinAt   DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  tasks           Task[]
+  pointRecords    PointRecord[]
+  orders          Order[]
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  type        String
+  status      String    @default("queued")
+  payload     Json
+  result      Json?
+  pointsCost  Int       @default(0)
+  userId      String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model ModelConfig {
+  id              String   @id @default(cuid())
+  provider        String
+  modelId         String
+  displayName     String
+  apiKeyEncrypted String?
+  enabled         Boolean  @default(true)
+  pointMultiplier Float    @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, modelId])
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  billingType String
+  price       Float
+  quota       Int
+  features    Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Order {
+  id         String   @id @default(cuid())
+  userId     String
+  planName   String
+  amount     Float
+  status     String   @default("paid")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id])
+}
+
+model PointRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  change    Int
+  reason    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}

@@ -1,0 +1,75 @@
+{
+  "generatedAt": "2026-03-27T16:11:55.165Z",
+  "thresholdPercent": 2,
+  "allPass": false,
+  "results": [
+    {
+      "page": "ai-search-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "article-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "assets-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "detect-desktop.png",
+      "diffPct": "66.65%",
+      "pass": false
+    },
+    {
+      "page": "editor-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "format-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "literature-desktop.png",
+      "diffPct": "71.12%",
+      "pass": false
+    },
+    {
+      "page": "ppt-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "proposal-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    },
+    {
+      "page": "reduce-ai-desktop.png",
+      "diffPct": "47.42%",
+      "pass": false
+    },
+    {
+      "page": "reduce-repeat-desktop.png",
+      "diffPct": "47.41%",
+      "pass": false
+    },
+    {
+      "page": "review-desktop.png",
+      "diffPct": "N/A",
+      "pass": false,
+      "reason": "missing current screenshot"
+    }
+  ]
+}

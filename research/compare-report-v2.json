@@ -1,0 +1,72 @@
+{
+  "generatedAt": "2026-03-27T08:37:15.101Z",
+  "thresholdPercent": 2,
+  "allPass": false,
+  "results": [
+    {
+      "page": "ai-search-desktop.png",
+      "diffPct": "6.60%",
+      "pass": false
+    },
+    {
+      "page": "detect-desktop.png",
+      "diffPct": "6.60%",
+      "pass": false
+    },
+    {
+      "page": "home-desktop.png",
+      "diffPct": "6.02%",
+      "pass": false
+    },
+    {
+      "page": "home-mobile.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "login-desktop.png",
+      "diffPct": "6.40%",
+      "pass": false
+    },
+    {
+      "page": "points-desktop.png",
+      "diffPct": "6.60%",
+      "pass": false
+    },
+    {
+      "page": "pricing-desktop.png",
+      "diffPct": "6.40%",
+      "pass": false
+    },
+    {
+      "page": "reduce-ai-empty.png",
+      "diffPct": "6.60%",
+      "pass": false
+    },
+    {
+      "page": "reduce-ai-input.png",
+      "diffPct": "6.78%",
+      "pass": false
+    },
+    {
+      "page": "reduce-ai-loading.png",
+      "diffPct": "6.77%",
+      "pass": false
+    },
+    {
+      "page": "reduce-repeat-desktop.png",
+      "diffPct": "6.60%",
+      "pass": false
+    },
+    {
+      "page": "register-desktop.png",
+      "diffPct": "6.40%",
+      "pass": false
+    },
+    {
+      "page": "tutorials-desktop.png",
+      "diffPct": "6.40%",
+      "pass": false
+    }
+  ]
+}

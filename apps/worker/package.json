@@ -1,0 +1,26 @@
+{
+  "name": "worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "BullMQ background worker",
+  "main": "dist/worker.js",
+  "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/worker.js"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "@sentry/node": "^8.55.1",
+    "bullmq": "^5.71.1",
+    "dotenv": "^17.3.1",
+    "ioredis": "^5.10.1",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  }
+}

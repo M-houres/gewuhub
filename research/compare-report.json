@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-03-27T05:11:39.289Z",
+  "thresholdPercent": 2,
+  "allPass": true,
+  "results": [
+    {
+      "page": "home-desktop.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "home-mobile.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "login-desktop.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "pricing-desktop.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "register-desktop.png",
+      "diffPct": "0.00%",
+      "pass": true
+    },
+    {
+      "page": "tutorials-desktop.png",
+      "diffPct": "0.00%",
+      "pass": true
+    }
+  ]
+}
