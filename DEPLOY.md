@@ -22,7 +22,11 @@ This guide is written for a non-developer operator. It brings up the full Gewu s
 
 1. Buy an ECS instance with Ubuntu 22.04 LTS or Ubuntu 24.04 LTS.
 2. Open at least port `80` in the ECS security group.
-3. Connect to the server through SSH.
+3. Point your domain DNS to the ECS public IP.
+4. If you want `www`, add `www.YOUR_DOMAIN` to the same server as either:
+   - a `CNAME` to the apex domain
+   - or an `A` record to the same ECS public IP
+5. Connect to the server through SSH.
 
 Example:
 
@@ -54,6 +58,12 @@ If you want to set your public IP or domain before deploying, you can edit:
 
 ```bash
 APP_WEB_BASE_URL=http://YOUR_ECS_PUBLIC_IP
+```
+
+Example with a real domain:
+
+```bash
+APP_WEB_BASE_URL=http://restin.top
 ```
 
 in the `.env` file.
