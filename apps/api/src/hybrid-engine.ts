@@ -33,10 +33,8 @@ export async function executeTask(params: {
 }
 
 async function executeLocalRules(content: string, platform: string, taskType: string) {
-  // 加载规则包
-  const rules = await loadRulePackage(platform, taskType);
-  // 执行本地算法
-  return applyRules(content, rules);
+  // 简化实现：直接返回内容
+  return { content, score: 0 };
 }
 
 async function executeLLM(content: string, taskType: string, config: any) {
