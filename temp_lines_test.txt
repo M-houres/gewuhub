@@ -1,4 +1,0 @@
-foo
-bar
-line1b
-line2
