@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -29,7 +29,7 @@ type TutorialFormValue = {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
 }
 
 export function ContentPage() {
@@ -47,7 +47,7 @@ export function ContentPage() {
       const data = await fetchJson<TutorialRow[]>("/api/v1/admin/content/tutorials");
       setRows(data);
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to load tutorials");
+      msgApi.error(error instanceof Error ? error.message : "加载教程失败");
     } finally {
       setLoading(false);
     }
@@ -105,19 +105,19 @@ export function ContentPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(values),
         });
-        msgApi.success("Tutorial updated");
+        msgApi.success("教程已更新");
       } else {
         await fetchJson("/api/v1/admin/content/tutorials", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(values),
         });
-        msgApi.success("Tutorial created");
+        msgApi.success("教程已创建");
       }
       closeModal();
       await loadTutorials();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to save tutorial");
+      msgApi.error(error instanceof Error ? error.message : "保存教程失败");
     } finally {
       setSaving(false);
     }
@@ -128,43 +128,43 @@ export function ContentPage() {
       await fetchJson(`/api/v1/admin/content/tutorials/${id}`, {
         method: "DELETE",
       });
-      msgApi.success("Tutorial deleted");
+      msgApi.success("教程已删除");
       await loadTutorials();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to delete tutorial");
+      msgApi.error(error instanceof Error ? error.message : "删除教程失败");
     }
   };
 
   const columns: ColumnsType<TutorialRow> = [
-    { title: "Title", dataIndex: "title", key: "title", width: 260 },
-    { title: "Slug", dataIndex: "slug", key: "slug", width: 180 },
-    { title: "Tag", dataIndex: "tag", key: "tag", width: 120 },
+    { title: "标题", dataIndex: "title", key: "title", width: 260 },
+    { title: "别名", dataIndex: "slug", key: "slug", width: 180 },
+    { title: "标签", dataIndex: "tag", key: "tag", width: 120 },
     {
-      title: "Status",
+      title: "状态",
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (status: TutorialStatus) => <Tag color={status === "published" ? "green" : "orange"}>{status}</Tag>,
+      render: (status: TutorialStatus) => <Tag color={status === "published" ? "green" : "orange"}>{status === "published" ? "已发布" : "草稿"}</Tag>,
     },
     {
-      title: "Updated At",
+      title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
       width: 170,
       render: (value: string) => formatDateTime(value),
     },
     {
-      title: "Actions",
+      title: "操作",
       key: "actions",
       width: 160,
       render: (_value, row) => (
         <Space>
           <Button size="small" onClick={() => openEditModal(row)}>
-            Edit
+            编辑
           </Button>
-          <Popconfirm title="Delete this tutorial?" onConfirm={() => void removeTutorial(row.id)}>
+          <Popconfirm title="确认删除该教程？" onConfirm={() => void removeTutorial(row.id)}>
             <Button size="small" danger>
-              Delete
+              删除
             </Button>
           </Popconfirm>
         </Space>
@@ -176,14 +176,14 @@ export function ContentPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Tutorial Management"
+        title="教程管理"
         extra={
           <Space>
             <Button onClick={() => void loadTutorials()} loading={loading}>
-              Refresh
+              刷新
             </Button>
             <Button type="primary" onClick={openCreateModal}>
-              New Tutorial
+              新建教程
             </Button>
           </Space>
         }
@@ -192,7 +192,7 @@ export function ContentPage() {
       </Card>
 
       <Modal
-        title={editingRow ? `Edit Tutorial: ${editingRow.title}` : "Create Tutorial"}
+        title={editingRow ? `编辑教程：${editingRow.title}` : "创建教程"}
         open={open}
         onCancel={closeModal}
         onOk={() => void submitTutorial()}
@@ -200,26 +200,26 @@ export function ContentPage() {
         width={760}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="title" label="Title" rules={[{ required: true, message: "Please enter title" }]}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="slug" label="Slug (optional)">
-            <Input placeholder="auto-generated from title when empty" />
+          <Form.Item name="slug" label="别名（可选）">
+            <Input placeholder="为空时根据标题自动生成" />
           </Form.Item>
-          <Form.Item name="tag" label="Tag" rules={[{ required: true, message: "Please enter tag" }]}>
+          <Form.Item name="tag" label="标签" rules={[{ required: true, message: "请输入标签" }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="summary" label="Summary" rules={[{ required: true, message: "Please enter summary" }]}>
+          <Form.Item name="summary" label="摘要" rules={[{ required: true, message: "请输入摘要" }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="content" label="Content" rules={[{ required: true, message: "Please enter content" }]}>
+          <Form.Item name="content" label="内容" rules={[{ required: true, message: "请输入内容" }]}>
             <Input.TextArea rows={8} />
           </Form.Item>
-          <Form.Item name="status" label="Status" rules={[{ required: true }]}>
+          <Form.Item name="status" label="状态" rules={[{ required: true }]}>
             <Select
               options={[
-                { value: "draft", label: "draft" },
-                { value: "published", label: "published" },
+                { value: "draft", label: "草稿" },
+                { value: "published", label: "已发布" },
               ]}
             />
           </Form.Item>
@@ -228,3 +228,7 @@ export function ContentPage() {
     </Space>
   );
 }
+
+
+
+

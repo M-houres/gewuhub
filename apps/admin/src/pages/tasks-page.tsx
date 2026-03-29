@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -19,7 +19,7 @@ type TaskRow = {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
 }
 
 export function TasksPage() {
@@ -33,7 +33,7 @@ export function TasksPage() {
       const data = await fetchJson<TaskRow[]>("/api/v1/admin/tasks");
       setRows(data);
     } catch {
-      msgApi.error("Failed to load tasks");
+      msgApi.error("任务加载失败");
     } finally {
       setLoading(false);
     }
@@ -44,17 +44,17 @@ export function TasksPage() {
   }, [loadTasks]);
 
   const columns: ColumnsType<TaskRow> = [
-    { title: "Task ID", dataIndex: "id", key: "id", width: 170 },
-    { title: "User", dataIndex: "userId", key: "userId", width: 130 },
-    { title: "Type", dataIndex: "type", key: "type", width: 120 },
+    { title: "任务ID", dataIndex: "id", key: "id", width: 170 },
+    { title: "用户", dataIndex: "userId", key: "userId", width: 130 },
+    { title: "类型", dataIndex: "type", key: "type", width: 120 },
     {
-      title: "Model",
+      title: "模型",
       key: "model",
       width: 170,
       render: (_value, row) => `${row.payload.provider}/${row.payload.modelId}`,
     },
     {
-      title: "Status",
+      title: "状态",
       dataIndex: "status",
       key: "status",
       width: 120,
@@ -65,12 +65,12 @@ export function TasksPage() {
           completed: "green",
           failed: "red",
         };
-        return <Tag color={colorMap[status]}>{status}</Tag>;
+        return <Tag color={colorMap[status]}>{status === "queued" ? "排队中" : status === "running" ? "运行中" : status === "completed" ? "已完成" : "失败"}</Tag>;
       },
     },
-    { title: "Points", dataIndex: "pointsCost", key: "pointsCost", width: 90 },
+    { title: "积分", dataIndex: "pointsCost", key: "pointsCost", width: 90 },
     {
-      title: "Created At",
+      title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
@@ -82,10 +82,10 @@ export function TasksPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Task Monitor"
+        title="任务监控"
         extra={
           <Button onClick={() => void loadTasks()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
@@ -94,3 +94,5 @@ export function TasksPage() {
     </Space>
   );
 }
+
+

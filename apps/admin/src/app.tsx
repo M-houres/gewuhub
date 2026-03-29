@@ -1,4 +1,4 @@
-import {
+﻿import {
   DashboardOutlined,
   DatabaseOutlined,
   DollarOutlined,
@@ -9,14 +9,12 @@ import {
   TeamOutlined,
 } from "@ant-design/icons";
 import ProLayout, { PageContainer } from "@ant-design/pro-layout";
-import enUS from "antd/locale/en_US";
 import zhCN from "antd/locale/zh_CN";
 import { Button, ConfigProvider, Space, Spin, Typography, message } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { clearAdminSession, getValidAdminSession } from "./lib/admin-auth";
 import { fetchJson, hasStaticAdminToken } from "./lib/api";
-import { useAdminLocale } from "./lib/locale";
 import { ContentPage } from "./pages/content-page";
 import { DashboardPage } from "./pages/dashboard-page";
 import { LoginPage } from "./pages/login-page";
@@ -36,7 +34,6 @@ type AdminMePayload = {
 };
 
 function App() {
-  const { isChinese, pick, toggleLocale } = useAdminLocale();
   const location = useLocation();
   const navigate = useNavigate();
   const [authReady, setAuthReady] = useState(false);
@@ -46,64 +43,64 @@ function App() {
 
   const menuData = useMemo(
     () => [
-      { path: "/", name: pick("仪表盘", "Dashboard"), icon: <DashboardOutlined /> },
-      { path: "/users", name: pick("用户管理", "Users"), icon: <TeamOutlined /> },
-      { path: "/tasks", name: pick("任务管理", "Tasks"), icon: <FireOutlined /> },
-      { path: "/orders", name: pick("订单管理", "Orders"), icon: <DollarOutlined /> },
-      { path: "/payment-logs", name: pick("支付回调", "Payment Logs"), icon: <DollarOutlined /> },
-      { path: "/plans", name: pick("套餐管理", "Plans"), icon: <GiftOutlined /> },
-      { path: "/models", name: pick("模型管理", "Models"), icon: <DatabaseOutlined /> },
-      { path: "/content", name: pick("内容管理", "Content"), icon: <FileTextOutlined /> },
-      { path: "/points", name: pick("积分管理", "Points"), icon: <GiftOutlined /> },
-      { path: "/settings", name: pick("系统设置", "Settings"), icon: <SettingOutlined /> },
+      { path: "/", name: "仪表盘", icon: <DashboardOutlined /> },
+      { path: "/users", name: "用户管理", icon: <TeamOutlined /> },
+      { path: "/tasks", name: "任务管理", icon: <FireOutlined /> },
+      { path: "/orders", name: "订单管理", icon: <DollarOutlined /> },
+      { path: "/payment-logs", name: "支付回调", icon: <DollarOutlined /> },
+      { path: "/plans", name: "套餐管理", icon: <GiftOutlined /> },
+      { path: "/models", name: "模型管理", icon: <DatabaseOutlined /> },
+      { path: "/content", name: "内容管理", icon: <FileTextOutlined /> },
+      { path: "/points", name: "积分管理", icon: <GiftOutlined /> },
+      { path: "/settings", name: "系统设置", icon: <SettingOutlined /> },
     ],
-    [pick],
+    [],
   );
 
   const pageMeta = useMemo<Record<string, { title: string; subtitle: string }>>(
     () => ({
       "/": {
-        title: pick("管理后台总览", "Admin Dashboard"),
-        subtitle: pick("查看今日用户、任务、收入、模型调用与任务健康情况。", "Monitor today's users, tasks, income, model usage, and task health."),
+        title: "管理后台总览",
+        subtitle: "查看今日用户、任务、收入、模型调用与任务健康情况。",
       },
       "/users": {
-        title: pick("用户管理", "User Management"),
-        subtitle: pick("查看用户、调整积分，并处理封禁与解封。", "View users, adjust points, and ban or unban abnormal accounts."),
+        title: "用户管理",
+        subtitle: "查看用户、调整积分，并处理封禁与解封。",
       },
       "/tasks": {
-        title: pick("任务管理", "Task Management"),
-        subtitle: pick("跟踪全部 AI 任务并快速定位失败任务。", "Track all AI tasks and quickly locate failed jobs."),
+        title: "任务管理",
+        subtitle: "跟踪全部 AI 任务并快速定位失败任务。",
       },
       "/orders": {
-        title: pick("订单管理", "Order Management"),
-        subtitle: pick("查看支付记录并处理幂等退款。", "Review payment records and process idempotent refunds."),
+        title: "订单管理",
+        subtitle: "查看支付记录并处理幂等退款。",
       },
       "/payment-logs": {
-        title: pick("支付回调日志", "Payment Callback Logs"),
-        subtitle: pick("检查签名校验与回调幂等处理结果。", "Inspect callback signature validation and idempotent processing results."),
+        title: "支付回调日志",
+        subtitle: "检查签名校验与回调幂等处理结果。",
       },
       "/plans": {
-        title: pick("套餐管理", "Plan Management"),
-        subtitle: pick("维护套餐价格、额度与功能说明。", "Maintain package price, quota, and plan details."),
+        title: "套餐管理",
+        subtitle: "维护套餐价格、额度与功能说明。",
       },
       "/models": {
-        title: pick("模型管理", "Model Management"),
-        subtitle: pick("控制模型启用状态、API Key 与积分倍率。", "Control model enablement, API key state, and point multipliers."),
+        title: "模型管理",
+        subtitle: "控制模型启用状态、API 密钥与积分倍率。",
       },
       "/content": {
-        title: pick("内容管理", "Content Management"),
-        subtitle: pick("维护教程文章与站点公告内容。", "Maintain tutorial articles and site announcements."),
+        title: "内容管理",
+        subtitle: "维护教程文章与站点公告内容。",
       },
       "/points": {
-        title: pick("积分管理", "Points Management"),
-        subtitle: pick("查看积分变动与全局积分规则。", "Review point changes and global point rules."),
+        title: "积分管理",
+        subtitle: "查看积分变动与全局积分规则。",
       },
       "/settings": {
-        title: pick("系统设置", "System Settings"),
-        subtitle: pick("配置网站信息、SMTP 与签到规则。", "Configure website, SMTP, and global check-in rules."),
+        title: "系统设置",
+        subtitle: "配置网站信息、SMTP 与签到规则。",
       },
     }),
-    [pick],
+    [],
   );
 
   const verifyAdminAuth = useCallback(async () => {
@@ -142,12 +139,7 @@ function App() {
 
   const logout = useCallback(async () => {
     if (hasStaticAdminToken()) {
-      msgApi.warning(
-        pick(
-          "当前启用了静态 Token 模式，如需使用会话退出，请移除 VITE_ADMIN_TOKEN。",
-          "Static token mode is enabled; remove VITE_ADMIN_TOKEN to use session logout.",
-        ),
-      );
+      msgApi.warning("当前启用了静态 Token 模式，如需使用会话退出，请移除 VITE_ADMIN_TOKEN。");
       return;
     }
 
@@ -156,14 +148,14 @@ function App() {
         method: "POST",
       });
     } catch {
-      // Keep local logout behavior even if API call fails.
+      // API 失败时仍执行本地退出。
     }
 
     clearAdminSession();
     setAuthenticated(false);
     setAdminIdentity(null);
     navigate("/login", { replace: true });
-  }, [msgApi, navigate, pick]);
+  }, [msgApi, navigate]);
 
   if (!authReady) {
     return (
@@ -179,7 +171,7 @@ function App() {
       >
         <Space size={12}>
           <Spin size="small" />
-          <span>{pick("正在检查管理员会话...", "Checking admin session...")}</span>
+          <span>正在检查管理员会话...</span>
         </Space>
       </div>
     );
@@ -205,7 +197,7 @@ function App() {
 
   return (
     <ConfigProvider
-      locale={isChinese ? zhCN : enUS}
+      locale={zhCN}
       theme={{
         token: {
           colorPrimary: "#4f46e5",
@@ -216,18 +208,15 @@ function App() {
       {contextHolder}
       <div style={{ minHeight: "100vh", background: "#f4f7ff" }}>
         <ProLayout
-          title={pick("Gewu 管理后台", "Gewu Admin")}
+          title="Gewu 管理后台"
           logo={false}
           layout="mix"
           navTheme="light"
           menu={{ defaultOpenAll: true }}
           actionsRender={() => [
             <Space key="admin-actions" size={12}>
-              <Button onClick={() => toggleLocale()}>{isChinese ? "EN" : "中文"}</Button>
-              <Typography.Text type="secondary">
-                {pick("管理员", "Admin")}: {adminIdentity?.username || "admin"}
-              </Typography.Text>
-              <Button onClick={() => void logout()}>{pick("退出登录", "Logout")}</Button>
+              <Typography.Text type="secondary">管理员：{adminIdentity?.username || "管理员"}</Typography.Text>
+              <Button onClick={() => void logout()}>退出登录</Button>
             </Space>,
           ]}
           route={{ path: "/", routes: menuData }}
@@ -268,3 +257,9 @@ function App() {
 }
 
 export default App;
+
+
+
+
+
+

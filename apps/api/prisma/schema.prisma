@@ -12,22 +12,56 @@ enum UserRole {
   ADMIN
 }
 
+enum TaskType {
+  DETECT
+  REWRITE
+  LITERATURE_REVIEW
+  PROPOSAL
+}
+
+enum TaskStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id              String         @id @default(cuid())
   email           String?        @unique
   phone           String?        @unique
   password        String?
   inviteCode      String?        @unique
+  invitedBy       String?
   role            UserRole       @default(USER)
   points          Int            @default(0)
   agentPoints     Int            @default(0)
   dailyDetectUsed Int            @default(0)
+  emailVerified   Boolean        @default(false)
   lastCheckinAt   DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
   tasks           Task[]
   pointRecords    PointRecord[]
   orders          Order[]
+  referrals       Referral[]
+
+  @@index([createdAt])
+  @@index([role, createdAt])
+  @@index([invitedBy])
+}
+
+model Referral {
+  id              String   @id @default(cuid())
+  userId          String
+  referredUserId  String
+  rewardPoints    Int      @default(0)
+  status          String   @default("pending")
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([referredUserId])
 }
 
 model Task {
@@ -42,6 +76,11 @@ model Task {
   updatedAt   DateTime  @updatedAt
   completedAt DateTime?
   user        User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@index([type, status])
 }
 
 model ModelConfig {
@@ -74,10 +113,35 @@ model Order {
   userId     String
   planName   String
   amount     Float
-  status     String   @default("paid")
+  status     String   @default("pending")
+  payMethod  String?
+  tradeNo    String?  @unique
+  paidAt     DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([tradeNo])
+}
+
+model PaymentConfig {
+  id          String   @id @default(cuid())
+  provider    String   @unique
+  enabled     Boolean  @default(false)
+  config      Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PromotionConfig {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             Json
+  description       String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model PointRecord {
@@ -87,4 +151,51 @@ model PointRecord {
   reason    String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model Platform {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  enabled     Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  taskTypes   Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  rulePackages RulePackage[]
+
+  @@index([enabled, sortOrder])
+}
+
+model RulePackage {
+  id          String   @id @default(cuid())
+  platformId  String
+  taskType    String
+  version     String
+  rules       Json
+  hash        String
+  status      String   @default("draft")
+  isActive    Boolean  @default(false)
+  uploadedBy  String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  platform    Platform @relation(fields: [platformId], references: [id])
+
+  @@unique([platformId, taskType, version])
+  @@index([platformId, taskType, isActive])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String
+  entityType  String
+  entityId    String
+  operator    String
+  details     Json
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }

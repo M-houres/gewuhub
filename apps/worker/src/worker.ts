@@ -11,6 +11,73 @@ const docxWorkerSecret = process.env.DOCX_WORKER_SECRET || "dev-docx-worker-secr
 
 const monitoringEnabled = initWorkerMonitoring("gewu-worker");
 
+function normalizeError(error: unknown) {
+  if (error instanceof Error) return error;
+  return new Error(typeof error === "string" ? error : JSON.stringify(error));
+}
+
+function getErrorCode(error: unknown) {
+  if (typeof error === "object" && error && "code" in error) {
+    const value = (error as { code?: unknown }).code;
+    return typeof value === "string" ? value : undefined;
+  }
+  return undefined;
+}
+
+function getErrorCause(error: unknown) {
+  if (typeof error === "object" && error && "cause" in error) {
+    const value = (error as { cause?: unknown }).cause;
+    if (!value) return undefined;
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+      };
+    }
+    return String(value);
+  }
+  return undefined;
+}
+
+function logWorkerError(label: string, error: unknown, extras?: Record<string, unknown>) {
+  const normalized = normalizeError(error);
+  const code = getErrorCode(error);
+  const cause = getErrorCause(error);
+
+  captureWorkerException(normalized, {
+    ...extras,
+    code,
+    cause,
+    name: normalized.name,
+    message: normalized.message,
+  });
+
+  // eslint-disable-next-line no-console
+  console.error(`[worker] ${label}`, {
+    name: normalized.name,
+    message: normalized.message,
+    code,
+    stack: normalized.stack,
+    cause,
+    ...extras,
+  });
+}
+
+process.on("unhandledRejection", (reason) => {
+  logWorkerError("unhandledRejection", reason, {
+    hook: "process.unhandledRejection",
+    queue: "docx-processing",
+  });
+});
+
+process.on("uncaughtException", (error) => {
+  logWorkerError("uncaughtException", error, {
+    hook: "process.uncaughtException",
+    queue: "docx-processing",
+  });
+});
+
 function buildWorkerOutputUrl(taskId: string, mode: "deai" | "rewrite" | "detect") {
   const extension = mode === "detect" ? "txt" : "docx";
   return `https://oss-example.gewu.local/results/${taskId}.${extension}`;
@@ -86,10 +153,14 @@ if (!enableQueue) {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       const outputUrl = buildWorkerOutputUrl(job.data.taskId, job.data.mode);
-      const documentText = await resolveDocumentText({
-        sourceFileUrl: job.data.sourceFileUrl,
-        sourceExtension: job.data.sourceExtension,
-      });
+      const documentText =
+        typeof job.data.documentText === "string" && job.data.documentText.trim().length > 0
+          ? job.data.documentText
+          : await resolveDocumentText({
+              sourceFileUrl: job.data.sourceFileUrl,
+              sourceExtension: job.data.sourceExtension,
+              sourceFileBase64: job.data.sourceFileBase64,
+            });
       const completePayload: Record<string, unknown> = {
         taskId: job.data.taskId,
         workerJobId,
@@ -129,7 +200,7 @@ if (!enableQueue) {
           tolerateStatuses: [404],
         },
       ).catch((callbackError) => {
-        captureWorkerException(callbackError, {
+        logWorkerError("failed callback", callbackError, {
           hook: "worker.failed.callback",
           jobId: job.id,
           queue: "docx-processing",
@@ -137,26 +208,21 @@ if (!enableQueue) {
       });
     }
 
-    captureWorkerException(error, {
+    logWorkerError("failed job", error, {
       hook: "worker.failed",
       jobId: job?.id,
       queue: "docx-processing",
     });
-    // eslint-disable-next-line no-console
-    console.error(`[worker] failed job ${job?.id}`, error);
   });
 
   worker.on("error", (error) => {
-    captureWorkerException(error, {
-      hook: "worker.error",
-      queue: "docx-processing",
-    });
-
     const now = Date.now();
     if (now - lastRuntimeErrorLogAt >= 30_000) {
       lastRuntimeErrorLogAt = now;
-      // eslint-disable-next-line no-console
-      console.error("[worker] runtime error", error.message);
+      logWorkerError("runtime error", error, {
+        hook: "worker.error",
+        queue: "docx-processing",
+      });
     }
   });
 

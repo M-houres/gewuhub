@@ -1,4 +1,4 @@
-import { Button, Card, Popconfirm, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Popconfirm, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -44,11 +44,22 @@ function statusColor(status: OrderRow["status"]) {
   return "orange";
 }
 
+function channelLabel(channel: OrderRow["channel"]) {
+  if (channel === "alipay") return "支付宝";
+  if (channel === "wechat") return "微信支付";
+  if (channel === "stripe") return "Stripe";
+  return "模拟通道";
+}
+
+function orderTypeLabel(orderType: OrderRow["orderType"]) {
+  return orderType === "plan" ? "套餐购买" : "积分充值";
+}
+
 function formatDateTime(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
 }
 
 export function OrdersPage() {
@@ -63,7 +74,7 @@ export function OrdersPage() {
       const data = await fetchJson<OrderRow[]>("/api/v1/admin/orders");
       setRows(data);
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to load orders");
+      msgApi.error(error instanceof Error ? error.message : "加载订单失败");
     } finally {
       setLoading(false);
     }
@@ -80,48 +91,62 @@ export function OrdersPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reason: "admin manual refund",
+          reason: "管理员手动退款",
         }),
       });
-      const amountText = `CNY ${data.refundedAmount}`;
+      const amountText = `¥ ${data.refundedAmount}`;
       msgApi.success(
         data.partialRefund
-          ? `${data.message}. Refunded ${data.refundedPoints} points / ${amountText}`
-          : `${data.message}. Refunded ${amountText}`,
+          ? `${data.message}。已退款 ${data.refundedPoints} 积分 / ${amountText}`
+          : `${data.message}。已退款 ${amountText}`,
       );
       await loadOrders();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Refund failed");
+      msgApi.error(error instanceof Error ? error.message : "退款失败");
     } finally {
       setRefundingOrderId(null);
     }
   };
 
   const columns: ColumnsType<OrderRow> = [
-    { title: "Order ID", dataIndex: "id", key: "id", width: 180, fixed: "left" },
-    { title: "OutTradeNo", dataIndex: "outTradeNo", key: "outTradeNo", width: 210 },
-    { title: "User", dataIndex: "userId", key: "userId", width: 140 },
-    { title: "Type", dataIndex: "orderType", key: "orderType", width: 90 },
-    { title: "Plan/Source", dataIndex: "planName", key: "planName", width: 130, render: (value?: string) => value || "-" },
-    { title: "Amount", dataIndex: "amount", key: "amount", width: 110, render: (value: number) => `CNY ${value}` },
-    { title: "Points", dataIndex: "pointsAmount", key: "pointsAmount", width: 90 },
-    { title: "Available", dataIndex: "availablePoints", key: "availablePoints", width: 90, render: (value?: number) => value ?? "-" },
-    { title: "Refunded", dataIndex: "refundedPoints", key: "refundedPoints", width: 90, render: (value?: number) => value ?? "-" },
-    { title: "Channel", dataIndex: "channel", key: "channel", width: 90 },
+    { title: "订单ID", dataIndex: "id", key: "id", width: 180, fixed: "left" },
+    { title: "商户单号", dataIndex: "outTradeNo", key: "outTradeNo", width: 210 },
+    { title: "用户", dataIndex: "userId", key: "userId", width: 140 },
     {
-      title: "Status",
+      title: "类型",
+      dataIndex: "orderType",
+      key: "orderType",
+      width: 100,
+      render: (value: OrderRow["orderType"]) => orderTypeLabel(value),
+    },
+    { title: "套餐/来源", dataIndex: "planName", key: "planName", width: 130, render: (value?: string) => value || "-" },
+    { title: "金额", dataIndex: "amount", key: "amount", width: 110, render: (value: number) => `¥ ${value}` },
+    { title: "积分", dataIndex: "pointsAmount", key: "pointsAmount", width: 90 },
+    { title: "可退积分", dataIndex: "availablePoints", key: "availablePoints", width: 90, render: (value?: number) => value ?? "-" },
+    { title: "已退积分", dataIndex: "refundedPoints", key: "refundedPoints", width: 90, render: (value?: number) => value ?? "-" },
+    {
+      title: "渠道",
+      dataIndex: "channel",
+      key: "channel",
+      width: 120,
+      render: (value: OrderRow["channel"]) => channelLabel(value),
+    },
+    {
+      title: "状态",
       dataIndex: "status",
       key: "status",
       width: 110,
-      render: (status: OrderRow["status"]) => <Tag color={statusColor(status)}>{status}</Tag>,
+      render: (status: OrderRow["status"]) => (
+        <Tag color={statusColor(status)}>{status === "pending" ? "待支付" : status === "paid" ? "已支付" : status === "failed" ? "失败" : "已退款"}</Tag>
+      ),
     },
-    { title: "Partial", dataIndex: "partialRefund", key: "partialRefund", width: 90, render: (value?: boolean) => (value ? "Yes" : "-") },
-    { title: "Callback", dataIndex: "callbackCount", key: "callbackCount", width: 90 },
-    { title: "Created", dataIndex: "createdAt", key: "createdAt", width: 170, render: (value: string) => formatDateTime(value) },
-    { title: "Paid", dataIndex: "paidAt", key: "paidAt", width: 170, render: (value?: string) => formatDateTime(value) },
-    { title: "Refunded At", dataIndex: "refundedAt", key: "refundedAt", width: 170, render: (value?: string) => formatDateTime(value) },
+    { title: "部分退款", dataIndex: "partialRefund", key: "partialRefund", width: 90, render: (value?: boolean) => (value ? "是" : "-") },
+    { title: "回调次数", dataIndex: "callbackCount", key: "callbackCount", width: 90 },
+    { title: "创建时间", dataIndex: "createdAt", key: "createdAt", width: 170, render: (value: string) => formatDateTime(value) },
+    { title: "支付时间", dataIndex: "paidAt", key: "paidAt", width: 170, render: (value?: string) => formatDateTime(value) },
+    { title: "退款时间", dataIndex: "refundedAt", key: "refundedAt", width: 170, render: (value?: string) => formatDateTime(value) },
     {
-      title: "Action",
+      title: "操作",
       key: "action",
       width: 150,
       fixed: "right",
@@ -130,13 +155,13 @@ export function OrdersPage() {
         if (!canRefund) return <span>-</span>;
         return (
           <Popconfirm
-            title="Refund this order?"
-            description="The system refunds only unconsumed points and will process idempotently."
+            title="确认退款该订单？"
+            description="系统仅退还未消耗积分，并执行幂等处理。"
             onConfirm={() => void refundOrder(row.id)}
             okButtonProps={{ loading: refundingOrderId === row.id }}
           >
             <Button size="small" danger loading={refundingOrderId === row.id}>
-              Refund
+              退款
             </Button>
           </Popconfirm>
         );
@@ -148,10 +173,10 @@ export function OrdersPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Payment Orders"
+        title="支付订单"
         extra={
           <Button onClick={() => void loadOrders()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
@@ -160,3 +185,5 @@ export function OrdersPage() {
     </Space>
   );
 }
+
+

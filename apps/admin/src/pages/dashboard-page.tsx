@@ -1,9 +1,8 @@
-import { Area, Column } from "@ant-design/charts";
+﻿import { Area, Column } from "@ant-design/charts";
 import { Button, Card, Col, Row, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
-import { useAdminLocale } from "../lib/locale";
 
 type TaskTrendPoint = {
   day: string;
@@ -70,10 +69,10 @@ const fallbackPayload: DashboardPayload = {
   recentTasks: [],
 };
 
-function formatDateTime(value: string, locale: string) {
+function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString(locale);
+  return date.toLocaleString("zh-CN");
 }
 
 function statusTagColor(status: RecentTaskRow["status"]) {
@@ -83,8 +82,14 @@ function statusTagColor(status: RecentTaskRow["status"]) {
   return "default";
 }
 
+function statusLabel(status: RecentTaskRow["status"]) {
+  if (status === "queued") return "排队中";
+  if (status === "running") return "运行中";
+  if (status === "completed") return "已完成";
+  return "失败";
+}
+
 export function DashboardPage() {
-  const { locale, pick } = useAdminLocale();
   const [data, setData] = useState<DashboardPayload>(fallbackPayload);
   const [loading, setLoading] = useState(false);
   const [msgApi, contextHolder] = message.useMessage();
@@ -95,65 +100,55 @@ export function DashboardPage() {
       const payload = await fetchJson<DashboardPayload>("/api/v1/admin/dashboard");
       setData(payload);
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : pick("加载仪表盘失败", "Failed to load dashboard"));
+      msgApi.error(error instanceof Error ? error.message : "加载仪表盘失败");
     } finally {
       setLoading(false);
     }
-  }, [msgApi, pick]);
+  }, [msgApi]);
 
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
 
   const recentTaskColumns: ColumnsType<RecentTaskRow> = [
-    { title: pick("任务 ID", "Task ID"), dataIndex: "id", key: "id", width: 170 },
-    { title: pick("用户", "User"), dataIndex: "userId", key: "userId", width: 140 },
+    { title: "任务ID", dataIndex: "id", key: "id", width: 170 },
+    { title: "用户", dataIndex: "userId", key: "userId", width: 140 },
     {
-      title: pick("状态", "Status"),
+      title: "状态",
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (status: RecentTaskRow["status"]) => (
-        <Tag color={statusTagColor(status)}>
-          {status === "queued"
-            ? pick("排队中", "Queued")
-            : status === "running"
-              ? pick("运行中", "Running")
-              : status === "completed"
-                ? pick("已完成", "Completed")
-                : pick("失败", "Failed")}
-        </Tag>
-      ),
+      render: (status: RecentTaskRow["status"]) => <Tag color={statusTagColor(status)}>{statusLabel(status)}</Tag>,
     },
-    { title: pick("模型", "Model"), dataIndex: "model", key: "model", width: 180 },
-    { title: pick("积分", "Points"), dataIndex: "pointsCost", key: "pointsCost", width: 90 },
+    { title: "模型", dataIndex: "model", key: "model", width: 180 },
+    { title: "积分", dataIndex: "pointsCost", key: "pointsCost", width: 90 },
     {
-      title: pick("创建时间", "Created At"),
+      title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
       width: 170,
-      render: (value: string) => formatDateTime(value, locale),
+      render: (value: string) => formatDateTime(value),
     },
   ];
 
   const modelUsageColumns: ColumnsType<ModelUsageRow> = [
-    { title: pick("模型", "Model"), dataIndex: "model", key: "model" },
-    { title: pick("调用次数", "Calls"), dataIndex: "count", key: "count", width: 90 },
-    { title: pick("积分消耗", "Points"), dataIndex: "pointsCost", key: "pointsCost", width: 110 },
+    { title: "模型", dataIndex: "model", key: "model" },
+    { title: "调用次数", dataIndex: "count", key: "count", width: 90 },
+    { title: "积分消耗", dataIndex: "pointsCost", key: "pointsCost", width: 110 },
     {
-      title: pick("预估成本", "Est. CNY"),
+      title: "预估成本",
       dataIndex: "cny",
       key: "cny",
       width: 120,
-      render: (value: number) => pick(`¥ ${value.toFixed(2)}`, `CNY ${value.toFixed(2)}`),
+      render: (value: number) => `¥ ${value.toFixed(2)}`,
     },
   ];
 
   const statusData = [
-    { status: pick("排队中", "Queued"), value: data.taskStatusBreakdown.queued },
-    { status: pick("运行中", "Running"), value: data.taskStatusBreakdown.running },
-    { status: pick("已完成", "Completed"), value: data.taskStatusBreakdown.completed },
-    { status: pick("失败", "Failed"), value: data.taskStatusBreakdown.failed },
+    { status: "排队中", value: data.taskStatusBreakdown.queued },
+    { status: "运行中", value: data.taskStatusBreakdown.running },
+    { status: "已完成", value: data.taskStatusBreakdown.completed },
+    { status: "失败", value: data.taskStatusBreakdown.failed },
   ];
 
   return (
@@ -162,47 +157,47 @@ export function DashboardPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("今日新增用户", "New Users (Today)")}</div>
+            <div className="text-sm text-[#6f7aa8]">今日新增用户</div>
             <div className="mt-1 text-3xl font-semibold text-[#27357a]">{data.newUsersToday}</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("今日任务量", "Tasks (Today)")}</div>
+            <div className="text-sm text-[#6f7aa8]">今日任务量</div>
             <div className="mt-1 text-3xl font-semibold text-[#27357a]">{data.taskCount}</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("今日收入", "Income (Today)")}</div>
-            <div className="mt-1 text-3xl font-semibold text-[#27357a]">{pick(`¥ ${data.income.toFixed(2)}`, `CNY ${data.income.toFixed(2)}`)}</div>
+            <div className="text-sm text-[#6f7aa8]">今日收入</div>
+            <div className="mt-1 text-3xl font-semibold text-[#27357a]">¥ {data.income.toFixed(2)}</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("今日模型调用", "Model Calls (Today)")}</div>
+            <div className="text-sm text-[#6f7aa8]">今日模型调用</div>
             <div className="mt-1 text-3xl font-semibold text-[#27357a]">{data.modelCalls}</div>
           </Card>
         </Col>
 
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("今日活跃用户", "Active Users (Today)")}</div>
+            <div className="text-sm text-[#6f7aa8]">今日活跃用户</div>
             <div className="mt-1 text-3xl font-semibold text-[#27357a]">{data.activeUsers}</div>
           </Card>
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Card>
-            <div className="text-sm text-[#6f7aa8]">{pick("累计收入", "Total Income")}</div>
-            <div className="mt-1 text-3xl font-semibold text-[#27357a]">{pick(`¥ ${data.totalIncome.toFixed(2)}`, `CNY ${data.totalIncome.toFixed(2)}`)}</div>
+            <div className="text-sm text-[#6f7aa8]">累计收入</div>
+            <div className="mt-1 text-3xl font-semibold text-[#27357a]">¥ {data.totalIncome.toFixed(2)}</div>
           </Card>
         </Col>
         <Col xs={24} sm={24} lg={12}>
           <Card
-            title={pick("任务状态分布", "Task Status Breakdown")}
+            title="任务状态分布"
             extra={
               <Button onClick={() => void loadDashboard()} loading={loading}>
-                {pick("刷新", "Refresh")}
+                刷新
               </Button>
             }
           >
@@ -211,18 +206,18 @@ export function DashboardPage() {
         </Col>
 
         <Col xs={24} lg={12}>
-          <Card title={pick("近 7 日任务趋势", "7-Day Task Trend")}>
+          <Card title="近 7 日任务趋势">
             <Area data={data.taskTrend} xField="day" yField="count" height={260} />
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title={pick("近 7 日预估成本", "7-Day Estimated Cost (CNY)")}>
+          <Card title="近 7 日预估成本（元）">
             <Area data={data.costTrend} xField="day" yField="cny" height={260} />
           </Card>
         </Col>
 
         <Col xs={24} lg={10}>
-          <Card title={pick("模型调用排行", "Top Models by Calls")}>
+          <Card title="模型调用排行">
             <Table
               rowKey="model"
               columns={modelUsageColumns}
@@ -234,7 +229,7 @@ export function DashboardPage() {
           </Card>
         </Col>
         <Col xs={24} lg={14}>
-          <Card title={pick("最近任务", "Recent Tasks")}>
+          <Card title="最近任务">
             <Table
               rowKey="id"
               columns={recentTaskColumns}

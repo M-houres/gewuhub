@@ -55,15 +55,15 @@
   "type": "commonjs",
   "dependencies": {
     "react": "18.3.1",
-    "react-dom": "18.3.1",
-    "pixelmatch": "^7.1.0",
-    "playwright": "^1.58.2",
-    "pngjs": "^7.0.0"
+    "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/react": "18.3.28",
     "@types/react-dom": "18.3.7",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "pixelmatch": "^7.1.0",
+    "playwright": "^1.58.2",
+    "pngjs": "^7.0.0"
   },
   "overrides": {
     "react": "18.3.1",

@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -49,7 +49,7 @@ export function PlansPage() {
       const data = await fetchJson<PlanRow[]>("/api/v1/admin/plans");
       setPlans(data);
     } catch {
-      msgApi.error("Failed to load plans");
+      msgApi.error("加载套餐失败");
     } finally {
       setLoading(false);
     }
@@ -60,12 +60,12 @@ export function PlansPage() {
   }, [loadPlans]);
 
   const columns: ColumnsType<PlanRow> = [
-    { title: "Plan Name", dataIndex: "name", key: "name" },
-    { title: "Monthly", dataIndex: "monthlyPrice", key: "monthlyPrice", width: 120, render: (value) => `CNY ${value}` },
-    { title: "Yearly", dataIndex: "yearlyPrice", key: "yearlyPrice", width: 120, render: (value) => `CNY ${value}` },
-    { title: "Quota (chars)", dataIndex: "quota", key: "quota", width: 140 },
+    { title: "套餐名称", dataIndex: "name", key: "name" },
+    { title: "月付", dataIndex: "monthlyPrice", key: "monthlyPrice", width: 120, render: (value) => `¥ ${value}` },
+    { title: "年付", dataIndex: "yearlyPrice", key: "yearlyPrice", width: 120, render: (value) => `¥ ${value}` },
+    { title: "字数额度", dataIndex: "quota", key: "quota", width: 140 },
     {
-      title: "Features",
+      title: "功能",
       dataIndex: "features",
       key: "features",
       render: (features: string[]) => (
@@ -77,17 +77,17 @@ export function PlansPage() {
       ),
     },
     {
-      title: "Actions",
+      title: "操作",
       key: "actions",
       width: 160,
       render: (_value, row) => (
         <Space>
           <Button size="small" onClick={() => openEdit(row)}>
-            Edit
+            编辑
           </Button>
-          <Popconfirm title="Delete this plan?" onConfirm={() => void removePlan(row.id)}>
+          <Popconfirm title="确认删除该套餐？" onConfirm={() => void removePlan(row.id)}>
             <Button size="small" danger>
-              Delete
+              删除
             </Button>
           </Popconfirm>
         </Space>
@@ -149,20 +149,20 @@ export function PlansPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        msgApi.success("Plan updated");
+        msgApi.success("套餐已更新");
       } else {
         await fetchJson("/api/v1/admin/plans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        msgApi.success("Plan created");
+        msgApi.success("套餐已创建");
       }
 
       closeModal();
       await loadPlans();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to save plan");
+      msgApi.error(error instanceof Error ? error.message : "保存套餐失败");
     } finally {
       setSaving(false);
     }
@@ -173,10 +173,10 @@ export function PlansPage() {
       await fetchJson(`/api/v1/admin/plans/${planId}`, {
         method: "DELETE",
       });
-      msgApi.success("Plan deleted");
+      msgApi.success("套餐已删除");
       await loadPlans();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to delete plan");
+      msgApi.error(error instanceof Error ? error.message : "删除套餐失败");
     }
   };
 
@@ -184,14 +184,14 @@ export function PlansPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Plan Management"
+        title="套餐管理"
         extra={
           <Space>
             <Button onClick={() => void loadPlans()} loading={loading}>
-              Refresh
+              刷新
             </Button>
             <Button type="primary" onClick={openCreate}>
-              Add Plan
+              新增套餐
             </Button>
           </Space>
         }
@@ -200,29 +200,29 @@ export function PlansPage() {
       </Card>
 
       <Modal
-        title={editingPlan ? `Edit Plan: ${editingPlan.name}` : "Create Plan"}
+        title={editingPlan ? `编辑套餐：${editingPlan.name}` : "创建套餐"}
         open={open}
         onCancel={closeModal}
         onOk={() => void submitPlan()}
         confirmLoading={saving}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="Name" rules={[{ required: true, message: "Please enter plan name" }]}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: "请输入套餐名称" }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="monthlyPrice" label="Monthly Price (CNY)" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="monthlyPrice" label="月付价格（CNY）" rules={[{ required: true, message: "必填项" }]}>
             <InputNumber style={{ width: "100%" }} min={0} />
           </Form.Item>
-          <Form.Item name="yearlyPrice" label="Yearly Price (CNY)" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="yearlyPrice" label="年付价格（CNY）" rules={[{ required: true, message: "必填项" }]}>
             <InputNumber style={{ width: "100%" }} min={0} />
           </Form.Item>
-          <Form.Item name="quota" label="Quota (chars)" rules={[{ required: true, message: "Required" }]}>
+          <Form.Item name="quota" label="字数额度" rules={[{ required: true, message: "必填项" }]}>
             <InputNumber style={{ width: "100%" }} min={0} />
           </Form.Item>
           <Form.Item
             name="featuresText"
-            label="Features (one per line)"
-            rules={[{ required: true, message: "Please provide at least one feature" }]}
+            label="功能说明（每行一个）"
+            rules={[{ required: true, message: "请至少填写一个功能" }]}
           >
             <Input.TextArea rows={6} placeholder={"例如：\n降重与降AIGC\n文献综述基础模板"} />
           </Form.Item>
@@ -231,3 +231,5 @@ export function PlansPage() {
     </Space>
   );
 }
+
+

@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, message } from "antd";
+﻿import { Button, Card, Space, Table, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -14,7 +14,7 @@ type PointRecord = {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
 }
 
 export function PointsPage() {
@@ -28,7 +28,7 @@ export function PointsPage() {
       const data = await fetchJson<PointRecord[]>("/api/v1/admin/points");
       setRows(data);
     } catch {
-      msgApi.error("Failed to load point records");
+      msgApi.error("加载积分记录失败");
     } finally {
       setLoading(false);
     }
@@ -39,10 +39,10 @@ export function PointsPage() {
   }, [loadPoints]);
 
   const columns: ColumnsType<PointRecord> = [
-    { title: "User", dataIndex: "userId", key: "userId", width: 140 },
-    { title: "Reason", dataIndex: "reason", key: "reason" },
+    { title: "用户", dataIndex: "userId", key: "userId", width: 140 },
+    { title: "原因", dataIndex: "reason", key: "reason" },
     {
-      title: "Change",
+      title: "变动",
       dataIndex: "change",
       key: "change",
       width: 110,
@@ -51,7 +51,7 @@ export function PointsPage() {
       ),
     },
     {
-      title: "Time",
+      title: "时间",
       dataIndex: "createdAt",
       key: "createdAt",
       width: 180,
@@ -63,20 +63,22 @@ export function PointsPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Point Change Records"
+        title="积分变动记录"
         extra={
           <Button onClick={() => void loadPoints()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
         <Table rowKey="id" columns={columns} dataSource={rows} loading={loading} scroll={{ x: 850 }} />
       </Card>
-      <Card title="Rules Snapshot">
-        <p>Daily check-in reward: 5 points/day.</p>
-        <p>Invite reward: 80 points/invite (placeholder).</p>
-        <p>Bulk grants to user groups can be managed in a later phase.</p>
+      <Card title="规则快照">
+        <p>每日签到奖励：5 积分/天。</p>
+        <p>邀请奖励：80 积分/人（占位配置）。</p>
+        <p>面向用户分组的批量赠送能力将在后续版本提供。</p>
       </Card>
     </Space>
   );
 }
+
+

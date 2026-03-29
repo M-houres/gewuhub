@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -7,7 +7,7 @@ import path from "node:path";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const apiDir = path.join(rootDir, "apps", "api");
-const scriptNames = [
+const defaultScriptNames = [
   "smoke-auth-lifecycle.mjs",
   "smoke-admin-auth.mjs",
   "smoke-admin-ban.mjs",
@@ -15,6 +15,7 @@ const scriptNames = [
   "smoke-workbench-nav.mjs",
   "smoke-plans-crud.mjs",
   "smoke-model-api-key.mjs",
+  "smoke-model-route-adapter.mjs",
   "smoke-admin-settings.mjs",
   "smoke-content-tutorials.mjs",
   "smoke-longform-task.mjs",
@@ -33,6 +34,9 @@ const scriptNames = [
   "smoke-points-concurrency.mjs",
   "smoke-payment-refund.mjs",
 ];
+
+const onlyScript = process.env.SMOKE_SCRIPT?.trim();
+const scriptNames = onlyScript && onlyScript.length > 0 ? [onlyScript] : defaultScriptNames;
 
 function ensure(condition, message) {
   if (!condition) {
@@ -138,6 +142,7 @@ async function main() {
     ENABLE_QUEUE: "false",
     SMOKE_EXPECT_LOCAL_DOCX_FALLBACK: "true",
     DOCX_WORKER_SECRET: process.env.DOCX_WORKER_SECRET || "smoke-docx-worker-secret",
+    EXPOSE_AUTH_DEBUG_TOKENS: "true",
   };
 
   const apiProcess = spawn(process.execPath, ["dist/server.js"], {
@@ -184,5 +189,6 @@ main().catch((error) => {
   );
   process.exit(1);
 });
+
 
 

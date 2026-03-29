@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -19,7 +19,14 @@ type PaymentCallbackLogRow = {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
+}
+
+function channelLabel(channel: PaymentCallbackLogRow["channel"]) {
+  if (channel === "alipay") return "支付宝";
+  if (channel === "wechat") return "微信支付";
+  if (channel === "stripe") return "Stripe";
+  return "模拟通道";
 }
 
 export function PaymentLogsPage() {
@@ -33,7 +40,7 @@ export function PaymentLogsPage() {
       const data = await fetchJson<PaymentCallbackLogRow[]>("/api/v1/admin/payment-callback-logs");
       setRows(data);
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to load payment callback logs");
+      msgApi.error(error instanceof Error ? error.message : "加载支付回调日志失败");
     } finally {
       setLoading(false);
     }
@@ -44,37 +51,43 @@ export function PaymentLogsPage() {
   }, [loadLogs]);
 
   const columns: ColumnsType<PaymentCallbackLogRow> = [
-    { title: "Time", dataIndex: "createdAt", key: "createdAt", width: 170, render: (value: string) => formatDateTime(value) },
-    { title: "OutTradeNo", dataIndex: "outTradeNo", key: "outTradeNo", width: 220 },
-    { title: "Order", dataIndex: "orderId", key: "orderId", width: 140, render: (value?: string) => value || "-" },
-    { title: "Channel", dataIndex: "channel", key: "channel", width: 90 },
-    { title: "Txn", dataIndex: "transactionId", key: "transactionId", width: 200, render: (value?: string) => value || "-" },
+    { title: "时间", dataIndex: "createdAt", key: "createdAt", width: 170, render: (value: string) => formatDateTime(value) },
+    { title: "商户单号", dataIndex: "outTradeNo", key: "outTradeNo", width: 220 },
+    { title: "订单ID", dataIndex: "orderId", key: "orderId", width: 140, render: (value?: string) => value || "-" },
     {
-      title: "Verified",
+      title: "渠道",
+      dataIndex: "channel",
+      key: "channel",
+      width: 100,
+      render: (value: PaymentCallbackLogRow["channel"]) => channelLabel(value),
+    },
+    { title: "交易号", dataIndex: "transactionId", key: "transactionId", width: 200, render: (value?: string) => value || "-" },
+    {
+      title: "验签",
       dataIndex: "verified",
       key: "verified",
       width: 90,
-      render: (value: boolean) => <Tag color={value ? "green" : "red"}>{value ? "yes" : "no"}</Tag>,
+      render: (value: boolean) => <Tag color={value ? "green" : "red"}>{value ? "通过" : "失败"}</Tag>,
     },
     {
-      title: "Accepted",
+      title: "受理",
       dataIndex: "accepted",
       key: "accepted",
       width: 90,
-      render: (value: boolean) => <Tag color={value ? "green" : "orange"}>{value ? "yes" : "no"}</Tag>,
+      render: (value: boolean) => <Tag color={value ? "green" : "orange"}>{value ? "通过" : "失败"}</Tag>,
     },
-    { title: "Reason", dataIndex: "reason", key: "reason", width: 180 },
-    { title: "Payload", dataIndex: "payload", key: "payload", render: (value: string) => <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{value}</pre> },
+    { title: "原因", dataIndex: "reason", key: "reason", width: 180 },
+    { title: "回调负载", dataIndex: "payload", key: "payload", render: (value: string) => <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{value}</pre> },
   ];
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Payment Callback Logs"
+        title="支付回调日志"
         extra={
           <Button onClick={() => void loadLogs()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
@@ -83,3 +96,4 @@ export function PaymentLogsPage() {
     </Space>
   );
 }
+

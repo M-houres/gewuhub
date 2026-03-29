@@ -190,7 +190,10 @@ async function main() {
   const completedTask = await getTaskDetail(token, completeTaskId);
   const completedDocx = await getDocxDetail(token, completeTaskId);
   ensure(completedTask.status === "completed", "completed task should be completed");
-  ensure(completedTask.result?.outputUrl === "https://oss-example.gewu.local/results/worker-smoke-complete.docx", "worker outputUrl should be preserved");
+  ensure(
+    completedTask.result?.outputUrl === "https://oss-example.gewu.local/results/worker-smoke-complete.docx",
+    `worker outputUrl should be preserved (task=${completedTask.result?.outputUrl || "null"}, callback=${complete.payload?.outputUrl || "null"}, idempotent=${String(complete.payload?.idempotent)}, taskStatus=${completedTask.status})`,
+  );
   ensure(completedDocx.status === "completed", "docx detail should be completed after worker completion");
 
   const createdFail = await createTask(token, "docx worker callback smoke failure flow");
@@ -247,3 +250,5 @@ main().catch((error) => {
   );
   process.exit(1);
 });
+
+

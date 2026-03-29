@@ -5,10 +5,18 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-SUDO=""
+SUDO_CMD=()
 if [[ "${EUID}" -ne 0 ]]; then
-  SUDO="sudo"
+  SUDO_CMD=(sudo)
 fi
+
+run_cmd() {
+  if [[ "${#SUDO_CMD[@]}" -gt 0 ]]; then
+    "${SUDO_CMD[@]}" "$@"
+  else
+    "$@"
+  fi
+}
 
 log() {
   printf '[deploy] %s\n' "$1"
@@ -20,7 +28,7 @@ ensure_docker() {
   fi
 
   log "Installing Docker"
-  curl -fsSL https://get.docker.com | $SUDO sh
+  curl -fsSL https://get.docker.com | run_cmd sh
 }
 
 ensure_compose() {
@@ -29,8 +37,8 @@ ensure_compose() {
   fi
 
   log "Installing Docker Compose plugin"
-  $SUDO apt-get update
-  $SUDO apt-get install -y docker-compose-plugin
+  run_cmd apt-get update
+  run_cmd apt-get install -y docker-compose-plugin
 }
 
 ensure_env_file() {
@@ -117,8 +125,8 @@ wait_for_http() {
 log "Preparing deployment prerequisites"
 ensure_docker
 ensure_compose
-$SUDO apt-get update
-$SUDO apt-get install -y curl git ca-certificates openssl
+run_cmd apt-get update
+run_cmd apt-get install -y curl git ca-certificates openssl
 
 ensure_env_file
 maybe_randomize_secret "POSTGRES_PASSWORD"

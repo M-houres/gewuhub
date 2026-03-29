@@ -17,8 +17,21 @@ import { checkRateLimit } from "./rate-limit";
 import { appendAdminAudit, listAdminAudit } from "./admin-audit";
 import { createStoreStatePersistence } from "./state-persistence";
 import { exportStoreSnapshot, hydrateStoreSnapshot, store, type StoreTask, type StoreUser, type WorkbenchNavKey } from "./store";
-import { replaceSystemSettings, systemSettings, systemSettingsSchema } from "./system-settings";
+import {
+  algorithmTaskTypeValues,
+  listAcademicPlatformConfigs,
+  listRulePackages,
+  replaceAcademicPlatformRegistry,
+  replaceSystemSettings,
+  resetAlgorithmSlotToDefault,
+  systemSettings,
+  systemSettingsSchema,
+  upsertAlgorithmSlotFromPackage,
+  isAcademicPlatformEnabled,
+} from "./system-settings";
 import { buildTaskResult, estimateTaskPoints } from "./task-engine";
+
+const generatedSourceFetchTimeoutMs = 15_000
 
 function toPositiveNumber(rawValue: string | number | undefined, fallback: number) {
   const parsed = Number(rawValue);
@@ -50,7 +63,8 @@ const adminAccessTokenTtlSeconds =
 const paymentChannels = ["alipay", "wechat", "stripe", "mock"] as const;
 const paymentOrderChannels = ["alipay", "wechat", "stripe"] as const;
 const allowedUploadExtensions = [".docx", ".pdf", ".txt"] as const;
-const maxUploadSizeBytes = Math.floor(toPositiveNumber(process.env.MAX_UPLOAD_SIZE_BYTES, 10 * 1024 * 1024));
+const maxUploadSizeBytes = Math.floor(toPositiveNumber(process.env.MAX_UPLOAD_SIZE_BYTES, 10 * 1024 * 1024)); 
+const maxRequestBodyBytes = Math.floor(toPositiveNumber(process.env.MAX_REQUEST_BODY_BYTES, 30 * 1024 * 1024)); 
 const maxTaskContentChars = Math.floor(toPositiveNumber(process.env.MAX_TASK_CONTENT_CHARS, 20000));
 const maxModelPromptChars = Math.floor(toPositiveNumber(process.env.MAX_MODEL_PROMPT_CHARS, 20000));
 const authLimitPerMinute = Math.floor(toPositiveNumber(process.env.RATE_LIMIT_AUTH_PER_MINUTE, 20));
@@ -67,7 +81,7 @@ const appEnv = (process.env.APP_ENV || "development").toLowerCase();
 const exposeAuthDebugTokens =
   typeof process.env.EXPOSE_AUTH_DEBUG_TOKENS === "string"
     ? process.env.EXPOSE_AUTH_DEBUG_TOKENS === "true"
-    : appEnv !== "production";
+    : false;
 
 const uploadHostAllowlist = (process.env.OSS_ALLOWED_HOSTS || "")
   .split(",")
@@ -75,8 +89,9 @@ const uploadHostAllowlist = (process.env.OSS_ALLOWED_HOSTS || "")
   .filter(Boolean);
 
 const app = Fastify({
-  logger: true,
-});
+  logger: true, 
+  bodyLimit: maxRequestBodyBytes, 
+}); 
 
 const registerSchema = z.object({
   email: z.string().email(),
@@ -189,9 +204,10 @@ const docxSubmitSchema = z.object({
   taskId: z.string().min(1),
   sourceFileUrl: z.string().url(),
   sourceFileName: z.string().min(1).optional(),
-  sourceFileSizeBytes: z.number().int().positive().optional(),
-  mode: z.enum(["deai", "rewrite", "detect"]),
-});
+  sourceFileSizeBytes: z.number().int().positive().optional(), 
+  sourceFileBase64: z.string().min(1).max(20 * 1024 * 1024).optional(), 
+  mode: z.enum(["deai", "rewrite", "detect"]), 
+}); 
 const docxWorkerProgressSchema = z.object({
   taskId: z.string().min(1),
   workerJobId: z.string().min(1).optional(),
@@ -270,6 +286,28 @@ const setModelApiKeySchema = z
 const updateWorkbenchNavSchema = z.object({
   visible: z.boolean(),
 });
+
+const platformListQuerySchema = z.object({
+  taskType: z.enum(algorithmTaskTypeValues).optional(),
+});
+
+const adminPlatformConfigUpdateSchema = z.object({
+  items: z.array(
+    z.object({
+      code: z.enum(academicPlatforms),
+      enabled: z.boolean(),
+      order: z.number().int().min(1).max(99),
+    }),
+  ).min(1).max(academicPlatforms.length),
+});
+
+const adminRulePackageUploadSchema = z.object({
+  taskType: z.enum(algorithmTaskTypeValues),
+  platform: z.enum(academicPlatforms),
+  fileName: z.string().min(1).max(200).optional(),
+  content: z.union([z.string().min(2).max(2_000_000), z.record(z.string(), z.any())]),
+});
+
 
 type UserAuthContext = {
   token: string;
@@ -547,8 +585,44 @@ function verifyGeneratedDetectReportSignature(taskId: string, expiresAtMs: numbe
   return timingSafeEqual(Buffer.from(expected), Buffer.from(providedSignature));
 }
 
+function toGeneratedTaskFileSignSource(taskId: string, extension: "txt" | "docx", expiresAtMs: number) {
+  return `${taskId}|${extension}|${expiresAtMs}`
+}
+
+function signGeneratedTaskFile(taskId: string, extension: "txt" | "docx", expiresAtMs: number) {
+  return createHmac("sha256", generatedFileSecret).update(toGeneratedTaskFileSignSource(taskId, extension, expiresAtMs)).digest("hex")
+}
+
+function verifyGeneratedTaskFileSignature(taskId: string, extension: "txt" | "docx", expiresAtMs: number, providedSignature: string) {
+  const expected = signGeneratedTaskFile(taskId, extension, expiresAtMs)
+  if (expected.length !== providedSignature.length) return false
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(providedSignature))
+}
+
 function getTaskDetectReport(task: StoreTask | null | undefined) {
   return ((task?.result as { report?: DetectReportModel } | undefined)?.report ?? null) as DetectReportModel | null;
+}
+
+async function fetchBufferWithTimeout(sourceFileUrl: string) {
+  const controller = new AbortController()
+  const timeoutHandle = setTimeout(() => controller.abort(), generatedSourceFetchTimeoutMs)
+  try {
+    const response = await fetch(sourceFileUrl, { signal: controller.signal })
+    if (!response.ok) {
+      throw new Error(`Unexpected source file status ${response.status}`)
+    }
+    return Buffer.from(await response.arrayBuffer())
+  } finally {
+    clearTimeout(timeoutHandle)
+  }
+}
+
+async function resolveSourceDocxBuffer(input: { sourceFileUrl: string; sourceFileBase64?: string }) {
+  const normalizedBase64 = typeof input.sourceFileBase64 === "string" ? input.sourceFileBase64.trim() : ""
+  if (normalizedBase64) {
+    return Buffer.from(normalizedBase64, "base64")
+  }
+  return fetchBufferWithTimeout(input.sourceFileUrl)
 }
 
 function verifyPaymentSignature(payload: PaymentNotifyInput) {
@@ -924,7 +998,12 @@ async function requireDocxWorker(request: FastifyRequest, reply: FastifyReply) {
   return true;
 }
 
-async function createTaskForUser(userId: string, input: TaskCreateInput, modelPointMultiplier: number): Promise<TaskCreateResult> {
+async function createTaskForUser(
+  userId: string,
+  input: TaskCreateInput,
+  modelPointMultiplier: number,
+  modelHasApiKey: boolean,
+): Promise<TaskCreateResult> {
   return withUserLock<TaskCreateResult>(userId, async () => {
     const currentUser = store.getUserById(userId);
     if (!currentUser) {
@@ -967,9 +1046,11 @@ async function createTaskForUser(userId: string, input: TaskCreateInput, modelPo
       mode: input.mode,
       provider: input.provider,
       modelId: input.modelId,
+      modelHasApiKey,
       pointsCost: finalCost,
       pointMultiplier: modelPointMultiplier,
       platform: input.platform,
+      executionManaged: true,
     });
 
     return {
@@ -1097,6 +1178,12 @@ async function bootstrap() {
   };
 
   const localDocxTimers = new Map<string, NodeJS.Timeout[]>();
+  const managedTaskTimers = new Map<string, NodeJS.Timeout[]>();
+  const managedTaskRunningDelayMs = Math.max(300, Math.floor(toPositiveNumber(process.env.MANAGED_TASK_RUNNING_DELAY_MS, 3000)));
+  const managedTaskExecuteDelayMs = Math.max(
+    managedTaskRunningDelayMs + 300,
+    Math.floor(toPositiveNumber(process.env.MANAGED_TASK_EXECUTE_DELAY_MS, 8000)),
+  );
 
   const clearLocalDocxTimers = (taskId: string) => {
     const timers = localDocxTimers.get(taskId);
@@ -1107,6 +1194,176 @@ async function bootstrap() {
     localDocxTimers.delete(taskId);
   };
 
+  const clearManagedTaskTimers = (taskId: string) => {
+    const timers = managedTaskTimers.get(taskId);
+    if (!timers) return;
+    for (const timer of timers) {
+      clearTimeout(timer);
+    }
+    managedTaskTimers.delete(taskId);
+  };
+
+  const shouldRouteManagedTaskToModel = (taskType: string, effectiveMode: string) => {
+    if (effectiveMode !== "hybrid" && effectiveMode !== "llm_only") return false;
+    return ["reduce-repeat", "reduce-ai", "literature", "proposal", "article", "format", "ppt", "review"].includes(
+      taskType,
+    );
+  };
+
+  const resolveManagedModelApiKey = (task: StoreTask) => {
+    const model = store.models.find(
+      (item) => item.provider === task.payload.provider && item.modelId === task.payload.modelId,
+    );
+    if (!model || !model.enabled) return undefined;
+    return model.apiKey;
+  };
+
+  const runManagedTaskExecution = async (taskId: string) => {
+    const task = store.getTask(taskId);
+    if (!task) {
+      clearManagedTaskTimers(taskId);
+      return;
+    }
+
+    try {
+      await withUserLock(task.userId, async () => {
+        const latestTask = store.getTask(taskId);
+        if (!latestTask) {
+          clearManagedTaskTimers(taskId);
+          return;
+        }
+        if (latestTask.status === "completed" || latestTask.status === "failed") {
+          clearManagedTaskTimers(taskId);
+          return;
+        }
+
+        const docxJob = store.getDocxJob(taskId);
+        if (docxJob) {
+          clearManagedTaskTimers(taskId);
+          return;
+        }
+
+        store.markTaskRunning(taskId);
+
+        const baseResult = buildTaskResult({
+          taskId: latestTask.id,
+          taskType: latestTask.type,
+          content: latestTask.payload.content,
+          mode: latestTask.payload.mode,
+          provider: latestTask.payload.provider,
+          modelId: latestTask.payload.modelId,
+          modelHasApiKey: latestTask.payload.modelHasApiKey,
+          platform: latestTask.payload.platform,
+        });
+
+        const detectReport = "report" in baseResult ? baseResult.report : undefined;
+        const executionMetaRaw = (baseResult as { execution?: unknown }).execution;
+        const executionMeta =
+          executionMetaRaw && typeof executionMetaRaw === "object"
+            ? ({ ...(executionMetaRaw as Record<string, unknown>) } as Record<string, unknown>)
+            : undefined;
+
+        let output = baseResult.output;
+        let traceId: string | undefined;
+        let tokensUsed: number | undefined;
+        let modelSource: "remote" | "fallback_local" | undefined;
+        let fallbackReason: string | undefined;
+
+        const effectiveMode = typeof executionMeta?.effectiveMode === "string" ? executionMeta.effectiveMode : "rules_only";
+        if (shouldRouteManagedTaskToModel(latestTask.type, effectiveMode)) {
+          const routed = await routeModel({
+            provider: latestTask.payload.provider,
+            modelId: latestTask.payload.modelId,
+            prompt: latestTask.payload.content,
+            taskType: latestTask.type,
+            temperature:
+              latestTask.payload.mode === "deep" ? 0.85 : latestTask.payload.mode === "light" ? 0.45 : 0.7,
+            modelApiKey: resolveManagedModelApiKey(latestTask),
+          });
+
+          if (typeof routed.output === "string" && routed.output.trim().length > 0) {
+            output = routed.output.trim();
+          }
+          traceId = routed.traceId;
+          tokensUsed = routed.tokensUsed;
+          modelSource = routed.source;
+          fallbackReason = routed.fallbackReason;
+
+          if (executionMeta) {
+            executionMeta.modelRouteSource = routed.source === "remote" ? "remote" : "fallback_local";
+            executionMeta.modelRouteTraceId = routed.traceId;
+            if (routed.fallbackReason) {
+              executionMeta.modelRouteFallbackReason = routed.fallbackReason;
+            }
+            if (routed.source === "fallback_local" && effectiveMode !== "rules_only") {
+              executionMeta.modelRouteFallbackApplied = true;
+            }
+          }
+        }
+
+        const completed = store.completeTask({
+          taskId: latestTask.id,
+          output,
+          outputUrl: baseResult.outputUrl,
+          report: detectReport,
+          execution: executionMeta,
+          traceId,
+          tokensUsed,
+          modelSource,
+          fallbackReason,
+        });
+
+        if (!completed) {
+          markTaskFailedAndRefundLocked(
+            latestTask.userId,
+            latestTask.id,
+            `Task ${latestTask.id} failed during managed execution finalization.`,
+          );
+          scheduleSnapshotPersist(`managed-task-failed:${latestTask.id}`, 0);
+          clearManagedTaskTimers(latestTask.id);
+          return;
+        }
+
+        scheduleSnapshotPersist(`managed-task-completed:${latestTask.id}`, 0);
+        clearManagedTaskTimers(latestTask.id);
+      });
+    } catch (error) {
+      captureApiException(error, {
+        tags: { scope: "tasks.managed" },
+        extras: { taskId },
+      });
+      await markTaskFailedAndRefund(task.userId, taskId, `Task ${taskId} failed during managed execution.`);
+      scheduleSnapshotPersist(`managed-task-failed:${taskId}`, 0);
+      clearManagedTaskTimers(taskId);
+    }
+  };
+
+  const scheduleManagedTaskExecution = (taskId: string) => {
+    clearManagedTaskTimers(taskId);
+
+    const runningTimer = setTimeout(() => {
+      const task = store.getTask(taskId);
+      if (!task || task.status === "completed" || task.status === "failed") {
+        clearManagedTaskTimers(taskId);
+        return;
+      }
+      if (store.getDocxJob(taskId)) {
+        clearManagedTaskTimers(taskId);
+        return;
+      }
+      store.markTaskRunning(taskId);
+      scheduleSnapshotPersist(`managed-task-running:${taskId}`, 0);
+    }, managedTaskRunningDelayMs);
+
+    const executeTimer = setTimeout(() => {
+      void runManagedTaskExecution(taskId);
+    }, managedTaskExecuteDelayMs);
+
+    if (typeof runningTimer.unref === "function") runningTimer.unref();
+    if (typeof executeTimer.unref === "function") executeTimer.unref();
+
+    managedTaskTimers.set(taskId, [runningTimer, executeTimer]);
+  };
   const markDocxJobFailed = (taskId: string, message: string, workerJobId?: string) => {
     clearLocalDocxTimers(taskId);
     store.updateDocxJob({
@@ -1250,7 +1507,12 @@ async function bootstrap() {
   const completeDocxTask = (taskId: string, input?: { outputUrl?: string; workerJobId?: string; content?: string }) => {
     const task = store.getTask(taskId);
     if (!task) return null;
-    if (task.status === "completed") {
+    const hasWorkerOutputUrl =
+      typeof input?.outputUrl === "string" && input.outputUrl.trim().length > 0;
+    const hasWorkerDocumentContent =
+      typeof input?.content === "string" && input.content.trim().length > 0;
+
+    if (task.status === "completed" && !hasWorkerOutputUrl && !hasWorkerDocumentContent) {
       if (typeof input?.workerJobId === "string") {
         store.updateDocxJob({
           taskId,
@@ -1278,13 +1540,23 @@ async function bootstrap() {
       mode: task.payload.mode,
       provider: task.payload.provider,
       modelId: task.payload.modelId,
+      modelHasApiKey: task.payload.modelHasApiKey,
       platform: task.payload.platform,
     });
+
+    const outputUrl =
+      typeof input?.outputUrl === "string" && input.outputUrl.trim().length > 0
+        ? input.outputUrl.trim()
+        : result.outputUrl; 
+    const detectReport = "report" in result ? result.report : undefined; 
+    const execution = "execution" in result ? result.execution : undefined;
 
     store.completeTask({
       taskId: task.id,
       output: result.output,
-      outputUrl: input?.outputUrl || result.outputUrl,
+      outputUrl, 
+      report: detectReport, 
+      execution,
     });
     store.updateDocxJob({
       taskId: task.id,
@@ -1304,7 +1576,9 @@ async function bootstrap() {
     sourceFileUrl: string;
     sourceFileName?: string;
     sourceFileSizeBytes?: number;
-    sourceExtension?: string;
+    sourceExtension?: string; 
+    sourceFileBase64?: string; 
+    documentText?: string; 
     mode: DocxMode;
   }) => {
     clearLocalDocxTimers(input.taskId);
@@ -1316,6 +1590,7 @@ async function bootstrap() {
       sourceFileName: input.sourceFileName,
       sourceFileSizeBytes: input.sourceFileSizeBytes,
       sourceExtension: input.sourceExtension,
+      sourceFileBase64: input.sourceFileBase64,
       mode: input.mode,
       queueStrategy: "local",
       status: "fallback-local",
@@ -1353,7 +1628,10 @@ async function bootstrap() {
         const task = store.getTask(input.taskId);
         if (!task) return;
 
-        const documentText = await resolveDocumentText({
+        const documentText =
+          typeof input.documentText === "string" && input.documentText.trim().length > 0
+            ? input.documentText
+            : await resolveDocumentText({
           sourceFileUrl: input.sourceFileUrl,
           sourceExtension: input.sourceExtension,
           fallbackText: task.payload.content,
@@ -1855,7 +2133,16 @@ async function bootstrap() {
     if (!hasMeaningfulContent(parsed.data.prompt)) {
       return reply.status(400).send({ message: "Prompt is empty or invalid." });
     }
-    const result = await routeModel(parsed.data);
+
+    const model = store.models.find(
+      (item) => item.provider === parsed.data.provider && item.modelId === parsed.data.modelId && item.enabled,
+    );
+    if (!model) return reply.status(400).send({ message: "Model is not available" });
+
+    const result = await routeModel({
+      ...parsed.data,
+      modelApiKey: model.apiKey,
+    });
     return result;
   });
 
@@ -1869,6 +2156,23 @@ async function bootstrap() {
         displayName: item.displayName,
         pointMultiplier: item.pointMultiplier,
       }));
+  });
+
+  app.get("/api/v1/platforms", async (request, reply) => {
+    const parsed = platformListQuerySchema.safeParse(request.query ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ message: "Invalid platform query", issues: parsed.error.issues });
+    }
+
+    const items = listAcademicPlatformConfigs({ enabledOnly: true }).map((item) => ({
+      code: item.code,
+      label: item.label,
+    }));
+
+    return {
+      taskType: parsed.data.taskType ?? null,
+      items,
+    };
   });
 
   app.get("/api/v1/plans", async () => {
@@ -2347,6 +2651,18 @@ async function bootstrap() {
     if (!parsed.success) {
       return reply.status(400).send({ message: "Invalid task payload", issues: parsed.error.issues });
     }
+    if (taskRequiresAcademicPlatform(parsed.data.type)) {
+      if (!parsed.data.platform) {
+        return reply.status(400).send({ message: "Platform is required for this task type." });
+      }
+      if (!isAcademicPlatformEnabled(parsed.data.platform)) {
+        return reply.status(400).send({
+          message: "Selected platform is disabled by admin settings.",
+          platform: parsed.data.platform,
+        });
+      }
+    }
+
     if (parsed.data.content.length > maxTaskContentChars) {
       return reply
         .status(400)
@@ -2361,7 +2677,7 @@ async function bootstrap() {
     );
     if (!model) return reply.status(400).send({ message: "Model is not available" });
 
-    const createResult = await createTaskForUser(auth.user.id, parsed.data, model.pointMultiplier);
+    const createResult = await createTaskForUser(auth.user.id, parsed.data, model.pointMultiplier, model.hasApiKey);
 
     if (createResult.status === "user-not-found") {
       return reply.status(404).send({ message: "User not found" });
@@ -2372,6 +2688,8 @@ async function bootstrap() {
         .status(402)
         .send({ message: "Insufficient points", points: createResult.points, required: createResult.required });
     }
+
+    scheduleManagedTaskExecution(createResult.taskId);
 
     return reply.status(202).send({
       taskId: createResult.taskId,
@@ -2400,6 +2718,18 @@ async function bootstrap() {
     if (!parsed.success) {
       return reply.status(400).send({ message: "Invalid streaming task payload", issues: parsed.error.issues });
     }
+    if (taskRequiresAcademicPlatform(parsed.data.type)) {
+      if (!parsed.data.platform) {
+        return reply.status(400).send({ message: "Platform is required for this task type." });
+      }
+      if (!isAcademicPlatformEnabled(parsed.data.platform)) {
+        return reply.status(400).send({
+          message: "Selected platform is disabled by admin settings.",
+          platform: parsed.data.platform,
+        });
+      }
+    }
+
     if (parsed.data.content.length > maxTaskContentChars) {
       return reply
         .status(400)
@@ -2414,7 +2744,7 @@ async function bootstrap() {
     );
     if (!model) return reply.status(400).send({ message: "Model is not available" });
 
-    const createResult = await createTaskForUser(auth.user.id, parsed.data, model.pointMultiplier);
+    const createResult = await createTaskForUser(auth.user.id, parsed.data, model.pointMultiplier, model.hasApiKey);
     if (createResult.status === "user-not-found") {
       return reply.status(404).send({ message: "User not found" });
     }
@@ -2468,6 +2798,7 @@ async function bootstrap() {
         prompt: parsed.data.content,
         taskType: parsed.data.type,
         temperature: parsed.data.mode === "deep" ? 0.85 : parsed.data.mode === "light" ? 0.45 : 0.7,
+        modelApiKey: model.apiKey,
       });
 
       const heading = `# ${parsed.data.type.toUpperCase()} Draft`;
@@ -2695,8 +3026,8 @@ async function bootstrap() {
     if (task.status !== "completed") {
       return reply.status(409).send({ message: "Task is not completed yet" });
     }
-    if (!task.result?.outputUrl) {
-      return reply.status(409).send({ message: "Task has no downloadable file" });
+    if (!task.result?.output) { 
+      return reply.status(409).send({ message: "Task has no downloadable file" }); 
     }
 
     const ticket = store.createDownloadTicket({
@@ -2752,12 +3083,14 @@ async function bootstrap() {
     const task = store.getTask(consumeResult.ticket.taskId);
     if (!task) return reply.status(404).send({ message: "Task not found" });
     if (task.userId !== auth.user.id) return reply.status(403).send({ message: "Forbidden" });
-    if (task.status !== "completed" || !task.result?.outputUrl) {
-      return reply.status(410).send({ message: "Task output is no longer available" });
+    if (task.status !== "completed" || !task.result?.output) { 
+      return reply.status(410).send({ message: "Task output is no longer available" }); 
     }
 
-    const defaultExtension = task.type === "detect" ? "pdf" : "docx";
-    const detectReport = getTaskDetectReport(task);
+    const detectReport = getTaskDetectReport(task); 
+    const docxJob = store.getDocxJob(task.id); 
+    const taskFileExtension: "txt" | "docx" = docxJob?.sourceExtension === ".docx" ? "docx" : "txt"; 
+    const defaultExtension = task.type === "detect" && detectReport ? "pdf" : taskFileExtension; 
     if (task.type === "detect" && detectReport) {
       const expiresAtMs = Date.now() + downloadTicketTtlSeconds * 1000;
       const signature = signGeneratedDetectReport(task.id, expiresAtMs);
@@ -2771,7 +3104,11 @@ async function bootstrap() {
     return {
       taskId: task.id,
       fileName: `${task.type}-${task.id}.${defaultExtension}`,
-      downloadUrl: task.result.outputUrl,
+      downloadUrl: (() => {
+        const expiresAtMs = Date.now() + downloadTicketTtlSeconds * 1000
+        const signature = signGeneratedTaskFile(task.id, taskFileExtension, expiresAtMs)
+        return `/api/v1/generated-files/task/${task.id}.${taskFileExtension}?expires=${expiresAtMs}&sig=${signature}`
+      })(),
     };
   });
 
@@ -2814,6 +3151,77 @@ async function bootstrap() {
     }
   });
 
+
+  app.get("/api/v1/generated-files/task/:taskId.txt", async (request, reply) => {
+    const params = request.params as { taskId: string };
+    const parsed = z
+      .object({
+        expires: z.coerce.number().int().positive(),
+        sig: z.string().min(1),
+      })
+      .safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: "Invalid generated file URL" });
+    }
+    if (Date.now() > parsed.data.expires) {
+      return reply.status(410).send({ message: "Generated file URL expired" });
+    }
+    if (!verifyGeneratedTaskFileSignature(params.taskId, "txt", parsed.data.expires, parsed.data.sig)) {
+      return reply.status(403).send({ message: "Invalid generated file signature" });
+    }
+
+    const task = store.getTask(params.taskId);
+    if (!task || task.status !== "completed" || !task.result?.output) {
+      return reply.status(404).send({ message: "Generated file not found" });
+    }
+
+    reply.header("Content-Type", "text/plain; charset=utf-8");
+    reply.header("Content-Disposition", `attachment; filename="${task.type}-${task.id}.txt"`);
+    reply.header("Cache-Control", "private, max-age=60");
+    return reply.send(task.result.output);
+  });
+
+  app.get("/api/v1/generated-files/task/:taskId.docx", async (request, reply) => {
+    const params = request.params as { taskId: string }
+    const parsed = z.object({ expires: z.coerce.number().int().positive(), sig: z.string().min(1) }).safeParse(request.query)
+    if (!parsed.success) return reply.status(400).send({ message: "Invalid generated file URL" })
+    if (Date.now() > parsed.data.expires) return reply.status(410).send({ message: "Generated file URL expired" })
+    if (!verifyGeneratedTaskFileSignature(params.taskId, "docx", parsed.data.expires, parsed.data.sig)) {
+      return reply.status(403).send({ message: "Invalid generated file signature" })
+    }
+    const task = store.getTask(params.taskId)
+    if (!task || task.status !== "completed" || !task.result?.output) {
+      return reply.status(404).send({ message: "Generated file not found" })
+    }
+
+    const docxJob = store.getDocxJob(params.taskId)
+    if (!docxJob || docxJob.sourceExtension !== ".docx") {
+      return reply.status(404).send({ message: "Source Word file not found" })
+    }
+
+    try {
+      const sourceDocxBuffer = await resolveSourceDocxBuffer({
+        sourceFileUrl: docxJob.sourceFileUrl,
+        sourceFileBase64: docxJob.sourceFileBase64,
+      })
+      const { buildDocxWithPreservedLayout } = await import("./docx-layout-rewrite.js")
+      const generatedBuffer = await buildDocxWithPreservedLayout({
+        sourceDocxBuffer,
+        rewrittenText: task.result.output,
+      })
+      reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+      reply.header("Content-Disposition", `attachment; filename="${task.type}-${task.id}.docx"`)
+      reply.header("Cache-Control", "private, max-age=60")
+      return reply.send(generatedBuffer)
+    } catch (error) {
+      captureApiException(error, {
+        tags: { scope: "generated-task.docx" },
+        extras: { taskId: params.taskId },
+      })
+      return reply.status(500).send({ message: "Failed to generate docx result" })
+    }
+  })
+
   app.post("/api/v1/tasks/docx", async (request, reply) => {
     const auth = await requireUser(request, reply);
     if (!auth) return;
@@ -2846,10 +3254,10 @@ async function bootstrap() {
       });
     }
 
-    if (!isAllowedUploadHost(parsed.data.sourceFileUrl)) {
+    if (!parsed.data.sourceFileBase64 && !isAllowedUploadHost(parsed.data.sourceFileUrl)) { 
       return reply.status(403).send({
         message: "Source file host is not in allowed OSS host list.",
-      });
+      }); 
     }
 
     const task = store.getTask(parsed.data.taskId);
@@ -2885,13 +3293,25 @@ async function bootstrap() {
       return reply.status(409).send({ message: "Task already failed and cannot accept document processing." });
     }
 
+    const extractedDocumentText =
+      typeof parsed.data.sourceFileBase64 === "string" && parsed.data.sourceFileBase64.trim().length > 0
+        ? await resolveDocumentText({
+            sourceFileUrl: parsed.data.sourceFileUrl,
+            sourceExtension: extension,
+            sourceFileBase64: parsed.data.sourceFileBase64,
+            fallbackText: task.payload.content,
+          })
+        : undefined; 
+
     const enqueueResult = await enqueueDocxProcessing({
       taskId: parsed.data.taskId,
       userId: auth.user.id,
       sourceFileUrl: parsed.data.sourceFileUrl,
       sourceFileName: parsed.data.sourceFileName,
       sourceFileSizeBytes: parsed.data.sourceFileSizeBytes,
-      sourceExtension: extension,
+      sourceExtension: extension, 
+      sourceFileBase64: parsed.data.sourceFileBase64,
+      documentText: extractedDocumentText, 
       mode: parsed.data.mode,
     });
 
@@ -2902,7 +3322,8 @@ async function bootstrap() {
         sourceFileUrl: parsed.data.sourceFileUrl,
         sourceFileName: parsed.data.sourceFileName,
         sourceFileSizeBytes: parsed.data.sourceFileSizeBytes,
-        sourceExtension: extension,
+        sourceExtension: extension, 
+        sourceFileBase64: parsed.data.sourceFileBase64,
         mode: parsed.data.mode,
         queueStrategy: "bullmq",
         status: "queued",
@@ -2917,10 +3338,13 @@ async function bootstrap() {
         sourceFileUrl: parsed.data.sourceFileUrl,
         sourceFileName: parsed.data.sourceFileName,
         sourceFileSizeBytes: parsed.data.sourceFileSizeBytes,
-        sourceExtension: extension,
+        sourceExtension: extension, 
+        sourceFileBase64: parsed.data.sourceFileBase64,
+        documentText: extractedDocumentText, 
         mode: parsed.data.mode,
       });
     }
+
 
     return reply.status(202).send({
       status: enqueueResult.accepted ? "queued" : "fallback-local",
@@ -3543,6 +3967,116 @@ async function bootstrap() {
 
     return updated;
   });
+  app.get("/api/v1/admin/platforms", { preHandler: requireAdmin }, async () => {
+    return {
+      items: listAcademicPlatformConfigs(),
+    };
+  });
+
+  app.put("/api/v1/admin/platforms", { preHandler: requireAdmin }, async (request, reply) => {
+    const parsed = adminPlatformConfigUpdateSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ message: "Invalid platform config payload", issues: parsed.error.issues });
+    }
+
+    try {
+      const nextItems = replaceAcademicPlatformRegistry(parsed.data.items);
+      writeAdminActionLog(request, {
+        action: "admin.platforms.update",
+        targetType: "platform_registry",
+        summary: "Updated academic platform availability",
+        detail: {
+          items: nextItems,
+        },
+      });
+      return {
+        items: nextItems,
+      };
+    } catch (error) {
+      return reply.status(400).send({ message: error instanceof Error ? error.message : "Failed to update platforms" });
+    }
+  });
+
+  app.get("/api/v1/admin/rule-packages", { preHandler: requireAdmin }, async () => {
+    return {
+      items: listRulePackages(),
+    };
+  });
+
+  app.post("/api/v1/admin/rule-packages/upload", { preHandler: requireAdmin }, async (request, reply) => {
+    const parsed = adminRulePackageUploadSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ message: "Invalid rule package payload", issues: parsed.error.issues });
+    }
+
+    let packageData = parsed.data.content;
+    if (typeof parsed.data.content === "string") {
+      try {
+        packageData = JSON.parse(parsed.data.content);
+      } catch {
+        return reply.status(400).send({ message: "Rule package content must be valid JSON" });
+      }
+    }
+
+    const nextSlot = upsertAlgorithmSlotFromPackage({
+      taskType: parsed.data.taskType,
+      platform: parsed.data.platform,
+      packageData,
+    });
+
+    writeAdminActionLog(request, {
+      action: "admin.rule_package.upload",
+      targetType: "rule_package",
+      targetId: `${parsed.data.taskType}.${parsed.data.platform}`,
+      summary: "Uploaded or replaced rule package",
+      detail: {
+        taskType: parsed.data.taskType,
+        platform: parsed.data.platform,
+        fileName: parsed.data.fileName ?? null,
+        version: nextSlot.version,
+      },
+    });
+
+    return {
+      taskType: parsed.data.taskType,
+      platform: parsed.data.platform,
+      slot: nextSlot,
+    };
+  });
+
+  app.post("/api/v1/admin/rule-packages/:taskType/:platform/delete", { preHandler: requireAdmin }, async (request, reply) => {
+    const paramsSchema = z.object({
+      taskType: z.enum(algorithmTaskTypeValues),
+      platform: z.enum(academicPlatforms),
+    });
+    const parsed = paramsSchema.safeParse(request.params ?? {});
+    if (!parsed.success) {
+      return reply.status(400).send({ message: "Invalid rule package identifier", issues: parsed.error.issues });
+    }
+
+    const resetSlot = resetAlgorithmSlotToDefault({
+      taskType: parsed.data.taskType,
+      platform: parsed.data.platform,
+    });
+
+    writeAdminActionLog(request, {
+      action: "admin.rule_package.reset",
+      targetType: "rule_package",
+      targetId: `${parsed.data.taskType}.${parsed.data.platform}`,
+      summary: "Reset rule package to default",
+      detail: {
+        taskType: parsed.data.taskType,
+        platform: parsed.data.platform,
+        version: resetSlot.version,
+      },
+    });
+
+    return {
+      taskType: parsed.data.taskType,
+      platform: parsed.data.platform,
+      slot: resetSlot,
+    };
+  });
 
   app.get("/api/v1/admin/settings", { preHandler: requireAdmin }, async () => {
     return {
@@ -3585,6 +4119,18 @@ async function bootstrap() {
 }
 
 void bootstrap();
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

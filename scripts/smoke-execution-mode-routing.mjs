@@ -58,6 +58,30 @@ async function putSettings(payload) {
   return response.payload;
 }
 
+async function listAdminModels() {
+  const response = await request("/api/v1/admin/models", {
+    method: "GET",
+    headers: {
+      "x-admin-token": adminToken,
+    },
+  });
+  ensure(response.status === 200, `list admin models failed: ${response.status}`);
+  return response.payload;
+}
+
+async function setModelApiKey(modelId, { apiKey, clear = false } = {}) {
+  const body = clear ? { clear: true } : { apiKey };
+  const response = await request(`/api/v1/admin/models/${modelId}/api-key`, {
+    method: "POST",
+    headers: {
+      "x-admin-token": adminToken,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  ensure(response.status === 200, `set model api key failed: ${response.status}`);
+  return response.payload;
+}
 async function registerVerifyLogin(prefix) {
   const email = randomEmail(prefix);
   const password = "pass1234";
@@ -150,20 +174,24 @@ async function pollTask(token, taskId) {
 
 async function main() {
   const originalSettings = await getSettings();
+  const adminModels = await listAdminModels();
+  const targetModel = adminModels.find((item) => item.provider === "deepseek" && item.modelId === "deepseek-v3");
+  ensure(Boolean(targetModel?.id), "target model deepseek/deepseek-v3 not found");
+  const targetModelId = targetModel.id;
   const modifiedSettings = clone(originalSettings);
-  modifiedSettings.algorithmEngine.execution.rewrite.platformModes.paperpass = "llm_only";
-  modifiedSettings.algorithmEngine.execution.detect.platformModes.paperpass = "hybrid";
+  modifiedSettings.algorithmEngine.taskMatrix["reduce-ai"].paperpass.mode = "llm_only";
+  modifiedSettings.algorithmEngine.taskMatrix.detect.paperpass.mode = "hybrid";
 
   await putSettings(modifiedSettings);
 
   try {
     const afterUpdate = await getSettings();
     ensure(
-      afterUpdate.algorithmEngine?.execution?.rewrite?.platformModes?.paperpass === "llm_only",
+      afterUpdate.algorithmEngine?.taskMatrix?.["reduce-ai"]?.paperpass?.mode === "llm_only",
       "rewrite platform execution mode not persisted",
     );
     ensure(
-      afterUpdate.algorithmEngine?.execution?.detect?.platformModes?.paperpass === "hybrid",
+      afterUpdate.algorithmEngine?.taskMatrix?.detect?.paperpass?.mode === "hybrid",
       "detect platform execution mode not persisted",
     );
 
@@ -172,7 +200,7 @@ async function main() {
 
     const rewriteTaskId = await createTask(session.token, {
       type: "reduce-ai",
-      content: "将AI诊断结果有效转化为论文修改建议。不同于传统做法，系统能够从多个维度刻画文本问题。",
+      content: "This reduce-ai smoke case validates execution-mode routing fallback behavior for the paperpass slot.",
       mode: "balanced",
       provider: "deepseek",
       modelId: "deepseek-v3",
@@ -189,7 +217,7 @@ async function main() {
 
     const detectTaskId = await createTask(session.token, {
       type: "detect",
-      content: "总之，本文认为这一方案具有重要意义，因此在很多场景都可以看出优势。",
+      content: "This detect smoke case validates execution-mode routing fallback behavior for the paperpass slot.",
       mode: "balanced",
       provider: "deepseek",
       modelId: "deepseek-v3",
@@ -199,6 +227,21 @@ async function main() {
     ensure(detectTask.result?.execution?.configuredMode === "hybrid", "detect configuredMode mismatch");
     ensure(detectTask.result?.execution?.effectiveMode === "rules_only", "detect should fall back to rules_only");
     ensure(detectTask.result?.execution?.fallbackApplied === true, "detect fallbackApplied should be true");
+    await setModelApiKey(targetModelId, { apiKey: "sk-smoke-live-routing-test-key-1234567890" });
+
+    const liveTaskId = await createTask(session.token, {
+      type: "reduce-ai",
+      content: "This reduce-ai smoke case validates execution-mode routing live mode behavior for the paperpass slot.",
+      mode: "balanced",
+      provider: "deepseek",
+      modelId: "deepseek-v3",
+      platform: "paperpass",
+    });
+    const liveTask = await pollTask(session.token, liveTaskId);
+    ensure(liveTask.result?.execution?.configuredMode === "llm_only", "live rewrite configuredMode mismatch");
+    ensure(liveTask.result?.execution?.effectiveMode === "llm_only", "live rewrite should stay llm_only");
+    ensure(liveTask.result?.execution?.liveModelAvailable === true, "live rewrite should mark live model available");
+    ensure(liveTask.result?.execution?.fallbackApplied === false, "live rewrite should not apply fallback");
 
     console.log(
       JSON.stringify(
@@ -206,10 +249,11 @@ async function main() {
           ok: true,
           apiBase,
           checks: [
-            "admin settings persist per-platform execution mode overrides",
+            "admin settings persist task-matrix per-platform execution mode overrides",
             "rewrite tasks expose configuredMode and effectiveMode metadata",
             "detect tasks expose configuredMode and effectiveMode metadata",
             "unwired real-model modes safely fall back to rules_only",
+            "configured API key allows llm_only slot to remain in live mode",
           ],
         },
         null,
@@ -217,6 +261,7 @@ async function main() {
       ),
     );
   } finally {
+    await setModelApiKey(targetModelId, { clear: true });
     await putSettings(originalSettings);
   }
 }
@@ -235,3 +280,4 @@ main().catch((error) => {
   );
   process.exit(1);
 });
+

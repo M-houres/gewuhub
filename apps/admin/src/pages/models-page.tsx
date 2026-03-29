@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, message } from "antd";
+﻿import { Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -36,7 +36,7 @@ function formatDateTime(value?: string) {
   if (!value) return "-";
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString("zh-CN");
 }
 
 export function ModelsPage() {
@@ -54,7 +54,7 @@ export function ModelsPage() {
       const data = await fetchJson<ModelRow[]>("/api/v1/admin/models");
       setModels(data);
     } catch {
-      msgApi.warning("Failed to load model list, fallback demo data is shown");
+      msgApi.warning("加载模型列表失败，当前显示演示数据");
       setModels(fallbackModels);
     } finally {
       setLoading(false);
@@ -74,9 +74,9 @@ export function ModelsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
-      msgApi.success("Model updated");
+      msgApi.success("模型已更新");
     } catch {
-      msgApi.error("Failed to update model, data has been rolled back");
+      msgApi.error("模型更新失败，已回滚数据");
       void loadModels();
     } finally {
       setSavingId(null);
@@ -122,10 +122,10 @@ export function ModelsPage() {
             : item,
         ),
       );
-      msgApi.success("API key saved");
+      msgApi.success("API密钥已保存");
       closeSetKeyModal();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to save API key");
+      msgApi.error(error instanceof Error ? error.message : "保存API密钥失败");
     } finally {
       setSavingKey(false);
     }
@@ -152,34 +152,34 @@ export function ModelsPage() {
             : item,
         ),
       );
-      msgApi.success("API key cleared");
+      msgApi.success("API密钥已清除");
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to clear API key");
+      msgApi.error(error instanceof Error ? error.message : "清除API密钥失败");
     } finally {
       setSavingId(null);
     }
   };
 
   const columns: ColumnsType<ModelRow> = [
-    { title: "Display Name", dataIndex: "displayName", key: "displayName" },
-    { title: "Provider", dataIndex: "provider", key: "provider", width: 120 },
-    { title: "Model ID", dataIndex: "modelId", key: "modelId", width: 170 },
+    { title: "显示名称", dataIndex: "displayName", key: "displayName" },
+    { title: "服务商", dataIndex: "provider", key: "provider", width: 120 },
+    { title: "模型ID", dataIndex: "modelId", key: "modelId", width: 170 },
     {
-      title: "API Key",
+      title: "API密钥",
       dataIndex: "hasApiKey",
       key: "hasApiKey",
       width: 120,
-      render: (hasApiKey: boolean) => <Tag color={hasApiKey ? "green" : "orange"}>{hasApiKey ? "Configured" : "Missing"}</Tag>,
+      render: (hasApiKey: boolean) => <Tag color={hasApiKey ? "green" : "orange"}>{hasApiKey ? "已配置" : "未配置"}</Tag>,
     },
     {
-      title: "Key Updated",
+      title: "密钥更新时间",
       dataIndex: "keyUpdatedAt",
       key: "keyUpdatedAt",
       width: 170,
       render: (value?: string) => formatDateTime(value),
     },
     {
-      title: "Enabled",
+      title: "启用",
       dataIndex: "enabled",
       key: "enabled",
       width: 100,
@@ -194,7 +194,7 @@ export function ModelsPage() {
       ),
     },
     {
-      title: "Point Multiplier",
+      title: "积分倍率",
       dataIndex: "pointMultiplier",
       key: "pointMultiplier",
       width: 130,
@@ -212,16 +212,16 @@ export function ModelsPage() {
       ),
     },
     {
-      title: "Action",
+      title: "操作",
       key: "action",
       width: 240,
       render: (_value, row) => (
         <Space>
           <Button size="small" onClick={() => openSetKeyModal(row)} loading={savingId === row.id || savingKey}>
-            Set Key
+            设置密钥
           </Button>
           <Button size="small" danger disabled={!row.hasApiKey} onClick={() => void clearApiKey(row)} loading={savingId === row.id}>
-            Clear Key
+            清除密钥
           </Button>
         </Space>
       ),
@@ -232,10 +232,10 @@ export function ModelsPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Model Management"
+        title="模型管理"
         extra={
           <Button onClick={() => void loadModels()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
@@ -243,7 +243,7 @@ export function ModelsPage() {
       </Card>
 
       <Modal
-        title={editingModel ? `Set API Key: ${editingModel.displayName}` : "Set API Key"}
+        title={editingModel ? `设置API密钥：${editingModel.displayName}` : "设置API密钥"}
         open={Boolean(editingModel)}
         onCancel={closeSetKeyModal}
         onOk={() => void submitApiKey()}
@@ -252,16 +252,20 @@ export function ModelsPage() {
         <Form form={keyForm} layout="vertical">
           <Form.Item
             name="apiKey"
-            label="API Key"
+            label="API密钥"
             rules={[
-              { required: true, message: "Please enter API key" },
-              { min: 10, message: "API key must be at least 10 characters" },
+              { required: true, message: "请输入API密钥" },
+              { min: 10, message: "API密钥至少10位" },
             ]}
           >
-            <Input.Password autoComplete="new-password" placeholder="Paste provider API key" />
+            <Input.Password autoComplete="new-password" placeholder="粘贴服务商API密钥" />
           </Form.Item>
         </Form>
       </Modal>
     </Space>
   );
 }
+
+
+
+

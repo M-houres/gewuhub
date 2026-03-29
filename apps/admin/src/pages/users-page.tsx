@@ -1,4 +1,4 @@
-import { Button, Card, Form, Input, Popconfirm, Space, Table, Tag, message } from "antd";
+﻿import { Button, Card, Form, Input, Popconfirm, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "../lib/api";
@@ -40,7 +40,7 @@ export function UsersPage() {
     if (!value) return "-";
     const date = new Date(value);
     if (!Number.isFinite(date.getTime())) return value;
-    return date.toLocaleString();
+    return date.toLocaleString("zh-CN");
   };
 
   const loadUsers = useCallback(async () => {
@@ -49,7 +49,7 @@ export function UsersPage() {
       const data = await fetchJson<UserRow[]>("/api/v1/admin/users");
       setRows(data);
     } catch {
-      msgApi.error("Failed to load users");
+      msgApi.error("加载用户失败");
     } finally {
       setLoading(false);
     }
@@ -67,11 +67,11 @@ export function UsersPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ change: Number(values.change), reason: values.reason }),
         });
-        msgApi.success(`Points updated, current points: ${result.points}`);
+        msgApi.success(`积分已更新，当前积分：${result.points}`);
         form.resetFields();
         void loadUsers();
       } catch {
-        msgApi.error("Failed to adjust points");
+        msgApi.error("调整积分失败");
       }
     });
   };
@@ -84,56 +84,56 @@ export function UsersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           banned: nextBanned,
-          reason: nextBanned ? "admin manual ban" : "admin manual unban",
+          reason: nextBanned ? "管理员手动封禁" : "管理员手动解封",
         }),
       });
-      msgApi.success(result.banned ? "User banned" : "User unbanned");
+      msgApi.success(result.banned ? "用户已封禁" : "用户已解封");
       void loadUsers();
     } catch (error) {
-      msgApi.error(error instanceof Error ? error.message : "Failed to update user status");
+      msgApi.error(error instanceof Error ? error.message : "更新用户状态失败");
     } finally {
       setUpdatingBanUserId(null);
     }
   };
 
   const columns: ColumnsType<UserRow> = [
-    { title: "User ID", dataIndex: "id", key: "id" },
-    { title: "Email", dataIndex: "email", key: "email" },
+    { title: "用户ID", dataIndex: "id", key: "id" },
+    { title: "邮箱", dataIndex: "email", key: "email" },
     {
-      title: "Email Verified",
+      title: "邮箱验证",
       dataIndex: "emailVerified",
       key: "emailVerified",
-      render: (verified: boolean) => <Tag color={verified ? "green" : "orange"}>{verified ? "Verified" : "Unverified"}</Tag>,
+      render: (verified: boolean) => <Tag color={verified ? "green" : "orange"}>{verified ? "已验证" : "未验证"}</Tag>,
     },
     {
-      title: "Role",
+      title: "角色",
       dataIndex: "role",
       key: "role",
-      render: (role: UserRow["role"]) => <Tag color={role === "ADMIN" ? "purple" : "blue"}>{role}</Tag>,
+      render: (role: UserRow["role"]) => <Tag color={role === "ADMIN" ? "purple" : "blue"}>{role === "ADMIN" ? "管理员" : "用户"}</Tag>,
     },
     {
-      title: "Status",
+      title: "状态",
       dataIndex: "banned",
       key: "banned",
-      render: (banned: boolean) => <Tag color={banned ? "red" : "green"}>{banned ? "Banned" : "Active"}</Tag>,
+      render: (banned: boolean) => <Tag color={banned ? "red" : "green"}>{banned ? "已封禁" : "正常"}</Tag>,
     },
     {
-      title: "Ban Reason",
+      title: "封禁原因",
       dataIndex: "banReason",
       key: "banReason",
       render: (value?: string) => value || "-",
     },
     {
-      title: "Banned At",
+      title: "封禁时间",
       dataIndex: "bannedAt",
       key: "bannedAt",
       render: (value?: string) => formatDateTime(value),
     },
-    { title: "Points", dataIndex: "points", key: "points" },
-    { title: "Agent Points", dataIndex: "agentPoints", key: "agentPoints" },
-    { title: "Created At", dataIndex: "createdAt", key: "createdAt", render: (value: string) => formatDateTime(value) },
+    { title: "通用积分", dataIndex: "points", key: "points" },
+    { title: "智能体积分", dataIndex: "agentPoints", key: "agentPoints" },
+    { title: "创建时间", dataIndex: "createdAt", key: "createdAt", render: (value: string) => formatDateTime(value) },
     {
-      title: "Action",
+      title: "操作",
       key: "action",
       render: (_, row) => {
         if (row.role === "ADMIN") {
@@ -142,12 +142,12 @@ export function UsersPage() {
         const nextBanned = !row.banned;
         return (
           <Popconfirm
-            title={nextBanned ? "Ban this user?" : "Unban this user?"}
+            title={nextBanned ? "确认封禁该用户？" : "确认解封该用户？"}
             onConfirm={() => void onToggleBan(row, nextBanned)}
             okButtonProps={{ loading: updatingBanUserId === row.id }}
           >
             <Button danger={nextBanned} loading={updatingBanUserId === row.id}>
-              {nextBanned ? "Ban" : "Unban"}
+              {nextBanned ? "封禁" : "解封"}
             </Button>
           </Popconfirm>
         );
@@ -159,32 +159,36 @@ export function UsersPage() {
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       {contextHolder}
       <Card
-        title="Users"
+        title="用户管理"
         extra={
           <Button onClick={() => void loadUsers()} loading={loading}>
-            Refresh
+            刷新
           </Button>
         }
       >
         <Table rowKey="id" columns={columns} dataSource={rows} loading={loading} scroll={{ x: 1500 }} />
       </Card>
 
-      <Card title="Adjust Points">
+      <Card title="积分调整">
         <Form form={form} layout="inline">
-          <Form.Item name="userId" rules={[{ required: true, message: "Please input user ID" }]}>
-            <Input placeholder="User ID" />
+          <Form.Item name="userId" rules={[{ required: true, message: "请输入用户ID" }]}>
+            <Input placeholder="用户ID" />
           </Form.Item>
-          <Form.Item name="change" rules={[{ required: true, message: "Please input points delta" }]}>
-            <Input placeholder="Delta (e.g. +100 / -50)" />
+          <Form.Item name="change" rules={[{ required: true, message: "请输入积分变动值" }]}>
+            <Input placeholder="变动值（如 +100 / -50）" />
           </Form.Item>
-          <Form.Item name="reason" rules={[{ required: true, message: "Please input reason" }]}>
-            <Input placeholder="Reason" />
+          <Form.Item name="reason" rules={[{ required: true, message: "请输入原因" }]}>
+            <Input placeholder="原因" />
           </Form.Item>
           <Button type="primary" onClick={onAdjustPoints}>
-            Submit
+            提交
           </Button>
         </Form>
       </Card>
     </Space>
   );
 }
+
+
+
+

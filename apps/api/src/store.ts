@@ -59,12 +59,20 @@ export type StoreTask = {
     mode: string;
     provider: ModelProvider;
     modelId: string;
+    modelHasApiKey?: boolean;
     pointMultiplier?: number;
     platform?: AcademicPlatform;
+    executionManaged?: boolean;
   };
   result?: {
     output: string;
-    outputUrl?: string;
+    outputUrl?: string; 
+    report?: unknown; 
+    execution?: unknown;
+    traceId?: string;
+    tokensUsed?: number;
+    modelSource?: "remote" | "fallback_local";
+    fallbackReason?: string;
   };
   pointsCost: number;
   pointsRefunded?: boolean;
@@ -81,7 +89,8 @@ export type DocxProcessingJob = {
   sourceFileUrl: string;
   sourceFileName?: string;
   sourceFileSizeBytes?: number;
-  sourceExtension?: string;
+  sourceExtension?: string; 
+  sourceFileBase64?: string; 
   mode: DocxProcessingMode;
   queueStrategy: "bullmq" | "local";
   status: DocxProcessingStatus;
@@ -286,7 +295,7 @@ const users: StoreUser[] = [
 ];
 
 const pointRecords: PointRecord[] = [
-  { id: uid("pt"), userId: "u_demo", change: 5, reason: "每日签到", createdAt: now },
+  { id: uid("pt"), userId: "u_demo", change: 5, reason: "签到奖励", createdAt: now },
   { id: uid("pt"), userId: "u_demo", change: -102, reason: "reduce-ai task cost", createdAt: now },
 ];
 
@@ -334,35 +343,35 @@ const models: ModelRegistryItem[] = [...defaultModelRegistry];
 const plans: Plan[] = [
   {
     id: "plan_free",
-    name: "免费版",
+    name: "Free",
     monthlyPrice: 0,
     yearlyPrice: 0,
     quota: 0,
-    features: ["每日 5 次 AIGC 检测", "检测基础报告", "教程访问"],
+    features: ["5 daily AIGC checks", "basic detect report", "tutorial access"],
   },
   {
     id: "plan_basic",
-    name: "基础版",
+    name: "Basic",
     monthlyPrice: 39,
     yearlyPrice: 368,
     quota: 30000,
-    features: ["降重与降AIGC", "文献综述基础模板", "任务历史留存"],
+    features: ["rewrite + de-AIGC", "literature template", "task history"],
   },
   {
     id: "plan_pro",
-    name: "专业版",
+    name: "Professional",
     monthlyPrice: 129,
     yearlyPrice: 1299,
     quota: 150000,
-    features: ["全部学术功能", "AI 编辑器与文件资产", "优先队列"],
+    features: ["full academic suite", "AI editor + assets", "priority queue"],
   },
   {
     id: "plan_team",
-    name: "企业版",
+    name: "Enterprise",
     monthlyPrice: 699,
     yearlyPrice: 6999,
     quota: 99999999,
-    features: ["多席位协作", "团队管理", "专属模型策略配置"],
+    features: ["multi-seat collaboration", "team management", "dedicated model policy"],
   },
 ];
 
@@ -410,7 +419,7 @@ const orders: Order[] = [
     id: "ord_seed_plan_1",
     userId: "u_demo",
     orderType: "plan",
-    planName: "专业版",
+    planName: "Professional",
     pointsAmount: 0,
     amount: 129,
     currency: "CNY",
@@ -427,7 +436,7 @@ const orders: Order[] = [
     id: "ord_seed_topup_1",
     userId: "u_demo",
     orderType: "topup",
-    planName: "POINTS_TOPUP",
+    planName: "Professional",
     pointsAmount: 500,
     amount: 19,
     currency: "CNY",
@@ -450,6 +459,38 @@ const orders: Order[] = [
   },
 ];
 
+const seedDemoDataEnabled =
+  process.env.SEED_DEMO_DATA === "true" ||
+  ((process.env.APP_ENV || "development").toLowerCase() !== "production" && process.env.SEED_DEMO_DATA !== "false");
+
+if (!seedDemoDataEnabled) {
+  for (let index = users.length - 1; index >= 0; index -= 1) {
+    const user = users[index];
+    if (user.email.endsWith("@gewu.local")) {
+      users.splice(index, 1);
+    }
+  }
+
+  const activeUserIds = new Set(users.map((item) => item.id));
+
+  for (let index = pointRecords.length - 1; index >= 0; index -= 1) {
+    if (!activeUserIds.has(pointRecords[index].userId)) {
+      pointRecords.splice(index, 1);
+    }
+  }
+
+  for (let index = tasks.length - 1; index >= 0; index -= 1) {
+    if (!activeUserIds.has(tasks[index].userId)) {
+      tasks.splice(index, 1);
+    }
+  }
+
+  for (let index = orders.length - 1; index >= 0; index -= 1) {
+    if (!activeUserIds.has(orders[index].userId)) {
+      orders.splice(index, 1);
+    }
+  }
+}
 const paymentCallbackLogs: PaymentCallbackLog[] = [];
 const downloadTickets: DownloadTicket[] = [];
 const emailVerificationTokens: EmailVerificationToken[] = [];
@@ -458,19 +499,19 @@ const emailDeliveryLogs: EmailDeliveryLog[] = [];
 const docxJobs: DocxProcessingJob[] = [];
 
 const workbenchNav: WorkbenchNavItem[] = [
-  { key: "ai-search", href: "/zh/AI-search", label: "科研智能体", visible: false, order: 1 },
-  { key: "reduce-repeat", href: "/zh/reduce-repeat", label: "降重复率", visible: true, order: 2 },
-  { key: "reduce-ai", href: "/zh/reduce-ai", label: "降AIGC率", visible: true, order: 3 },
-  { key: "detect", href: "/zh/detect", label: "AIGC检测", visible: true, order: 4 },
-  { key: "literature", href: "/zh/literature", label: "文献综述", visible: true, order: 5 },
-  { key: "proposal", href: "/zh/proposal", label: "开题报告", visible: false, order: 6 },
-  { key: "article", href: "/zh/article", label: "文章生成", visible: false, order: 7 },
-  { key: "format", href: "/zh/format", label: "格式调整", visible: false, order: 8 },
-  { key: "editor", href: "/zh/editor", label: "AI编辑器", visible: false, order: 9 },
+  { key: "ai-search", href: "/zh/AI-search", label: "AI Search", visible: false, order: 1 },
+  { key: "reduce-repeat", href: "/zh/reduce-repeat", label: "Reduce Repeat", visible: true, order: 2 },
+  { key: "reduce-ai", href: "/zh/reduce-ai", label: "Reduce AIGC", visible: true, order: 3 },
+  { key: "detect", href: "/zh/detect", label: "AIGC Detect", visible: true, order: 4 },
+  { key: "literature", href: "/zh/literature", label: "Literature", visible: true, order: 5 },
+  { key: "proposal", href: "/zh/proposal", label: "Proposal", visible: false, order: 6 },
+  { key: "article", href: "/zh/article", label: "Article", visible: false, order: 7 },
+  { key: "format", href: "/zh/format", label: "Format", visible: false, order: 8 },
+  { key: "editor", href: "/zh/editor", label: "AI Editor", visible: false, order: 9 },
   { key: "ppt", href: "/zh/ppt", label: "AI PPT", visible: false, order: 10 },
-  { key: "review", href: "/zh/review", label: "AI审稿", visible: false, order: 11 },
-  { key: "assets", href: "/zh/assets", label: "我的资产", visible: false, order: 12 },
-  { key: "points", href: "/zh/points", label: "积分中心", visible: true, order: 13 },
+  { key: "review", href: "/zh/review", label: "AI Review", visible: false, order: 11 },
+  { key: "assets", href: "/zh/assets", label: "Assets", visible: false, order: 12 },
+  { key: "points", href: "/zh/points", label: "Points", visible: true, order: 13 },
 ];
 
 const sessions = new Map<string, AuthSession>();
@@ -532,7 +573,7 @@ function normalizePlanFeatures(features: string[]) {
     normalized.push(value);
   }
   if (normalized.length > 0) return normalized;
-  return ["默认功能"];
+  return ["姒涙鍔熻兘"];
 }
 
 export const store = {
@@ -978,9 +1019,11 @@ export const store = {
     mode: string;
     provider: ModelProvider;
     modelId: string;
+    modelHasApiKey?: boolean;
     pointsCost: number;
     pointMultiplier?: number;
     platform?: AcademicPlatform;
+    executionManaged?: boolean;
   }) {
     const nowIso = new Date().toISOString();
     const task: StoreTask = {
@@ -993,8 +1036,10 @@ export const store = {
         mode: input.mode,
         provider: input.provider,
         modelId: input.modelId,
+        modelHasApiKey: input.modelHasApiKey,
         pointMultiplier: input.pointMultiplier,
         platform: input.platform,
+        executionManaged: input.executionManaged,
       },
       pointsCost: input.pointsCost,
       pointsRefunded: false,
@@ -1011,7 +1056,8 @@ export const store = {
 
     const docxJob = docxJobs.find((item) => item.taskId === taskId);
     const elapsed = Date.now() - new Date(task.createdAt).getTime();
-    if (!docxJob && task.status !== "completed" && task.status !== "failed") {
+    const executionManaged = Boolean(task.payload.executionManaged);
+    if (!docxJob && !executionManaged && task.status !== "completed" && task.status !== "failed") {
       if (elapsed > 8000) {
         const shouldFail = task.payload.content.toLowerCase().includes("[force_fail]");
         if (shouldFail) {
@@ -1028,6 +1074,7 @@ export const store = {
             mode: task.payload.mode,
             provider: task.payload.provider,
             modelId: task.payload.modelId,
+            modelHasApiKey: task.payload.modelHasApiKey,
             platform: task.payload.platform,
           });
         }
@@ -1052,7 +1099,8 @@ export const store = {
     sourceFileUrl: string;
     sourceFileName?: string;
     sourceFileSizeBytes?: number;
-    sourceExtension?: string;
+    sourceExtension?: string; 
+    sourceFileBase64?: string; 
     mode: DocxProcessingMode;
     queueStrategy: "bullmq" | "local";
     status: DocxProcessingStatus;
@@ -1068,7 +1116,8 @@ export const store = {
       existing.sourceFileUrl = input.sourceFileUrl;
       existing.sourceFileName = input.sourceFileName;
       existing.sourceFileSizeBytes = input.sourceFileSizeBytes;
-      existing.sourceExtension = input.sourceExtension;
+      existing.sourceExtension = input.sourceExtension; 
+      existing.sourceFileBase64 = input.sourceFileBase64; 
       existing.mode = input.mode;
       existing.queueStrategy = input.queueStrategy;
       existing.status = input.status;
@@ -1095,6 +1144,7 @@ export const store = {
       sourceFileName: input.sourceFileName,
       sourceFileSizeBytes: input.sourceFileSizeBytes,
       sourceExtension: input.sourceExtension,
+      sourceFileBase64: input.sourceFileBase64,
       mode: input.mode,
       queueStrategy: input.queueStrategy,
       status: input.status,
@@ -1172,13 +1222,29 @@ export const store = {
     return task;
   },
 
-  completeTask(input: { taskId: string; output: string; outputUrl?: string }) {
+  completeTask(input: {
+    taskId: string;
+    output: string;
+    outputUrl?: string;
+    report?: unknown;
+    execution?: unknown;
+    traceId?: string;
+    tokensUsed?: number;
+    modelSource?: "remote" | "fallback_local";
+    fallbackReason?: string;
+  }) {
     const task = tasks.find((item) => item.id === input.taskId);
     if (!task) return null;
     task.status = "completed";
     task.result = {
       output: input.output,
-      outputUrl: input.outputUrl,
+      outputUrl: input.outputUrl, 
+      report: input.report,
+      execution: input.execution,
+      traceId: input.traceId,
+      tokensUsed: input.tokensUsed,
+      modelSource: input.modelSource,
+      fallbackReason: input.fallbackReason,
     };
     task.updatedAt = new Date().toISOString();
     return task;
@@ -1321,7 +1387,7 @@ export const store = {
       id: uid("ord"),
       userId: input.userId,
       orderType: "topup",
-      planName: "POINTS_TOPUP",
+      planName: "Professional",
       pointsAmount: input.pointsAmount,
       creditedPoints: 0,
       availablePoints: 0,

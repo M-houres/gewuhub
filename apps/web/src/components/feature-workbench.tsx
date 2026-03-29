@@ -1,11 +1,10 @@
-"use client";
+﻿"use client";
 
 import { getValidSession, toApiUrl, updateSessionUser } from "@/lib/auth";
 import { Copy, Download, History, UploadCloud } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactDiffViewer from "react-diff-viewer-continued";
 import { useDropzone, type FileRejection } from "react-dropzone";
 
 type WorkbenchVariant = "reduce-ai" | "reduce-repeat" | "detect";
@@ -37,6 +36,9 @@ type TaskDownloadTicketResponse = { downloadPath: string };
 type TaskDownloadResolveResponse = { downloadUrl?: string; message?: string };
 type DocxProgressResponse = { progress: number };
 type PointsSummaryResponse = { points: number; agentPoints: number; dailyDetectUsed: number; dailyDetectLimit: number };
+type PlatformListResponse = {
+  items: Array<{ code: AcademicPlatformCode; label: string }>;
+};
 
 type TaskListItem = {
   id: string;
@@ -60,12 +62,9 @@ const defaultModel = { provider: "deepseek", modelId: "deepseek-v3" } as const;
 const maxUploadSizeBytes = 10 * 1024 * 1024;
 const defaultAcademicPlatform: AcademicPlatformCode = "cnki";
 const genericPlatformLabel = "通用";
-const academicPlatformOptions: AcademicPlatformOption[] = [
+const fallbackAcademicPlatformOptions: AcademicPlatformOption[] = [
   { code: "cnki", label: "知网" },
   { code: "weipu", label: "维普" },
-  { code: "paperpass", label: "PaperPass" },
-  { code: "wanfang", label: "万方" },
-  { code: "daya", label: "大雅" },
 ];
 const defaultLanguage = "中文";
 
@@ -107,31 +106,7 @@ const detectServiceItems = [
 ];
 
 const sampleText =
-  "Artificial intelligence is rapidly reshaping academic writing. Students increasingly use generative systems to organize literature, outline arguments, and draft early versions of papers. While these tools improve efficiency, they can also produce repetitive phrasing, generic logic, and detectable stylistic patterns. Universities therefore need clear governance that encourages responsible assistance without replacing critical thinking, disciplinary judgment, and original analysis.";
-
-const diffStyles = {
-  variables: {
-    light: {
-      diffViewerBackground: "#ffffff",
-      addedBackground: "#eefaf3",
-      removedBackground: "#fff2f2",
-      wordAddedBackground: "#c9f0d9",
-      wordRemovedBackground: "#ffd6d6",
-      addedGutterBackground: "#f0fdf4",
-      removedGutterBackground: "#fff1f2",
-      gutterBackground: "#f8f9ff",
-      gutterBackgroundDark: "#f8f9ff",
-      gutterColor: "#7380a8",
-      addedGutterColor: "#3f7f4f",
-      removedGutterColor: "#a94545",
-      codeFoldGutterBackground: "#eef1ff",
-      codeFoldBackground: "#f7f8ff",
-      emptyLineBackground: "#f8f9ff",
-      highlightBackground: "#fff2bf",
-      highlightGutterBackground: "#ffe992",
-    },
-  },
-};
+  "人工智能正在快速重塑学术写作。学生越来越多地使用生成式系统整理文献、组织论证并起草论文初稿。这些工具虽然提升了效率，也可能带来重复表达、逻辑模板化和可检测的风格痕迹。高校需要建立清晰规范，在鼓励合理使用辅助工具的同时，确保批判思维、学科判断与原创分析不被替代。";
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,18 +118,22 @@ function toSafeScore(value: unknown) {
   return matched?.[1] ? Math.max(0, Math.min(100, Number(matched[1]) || 18)) : 18;
 }
 
-function getAcademicPlatformLabel(platform?: AcademicPlatformCode | null) {
-  return academicPlatformOptions.find((item) => item.code === platform)?.label ?? genericPlatformLabel;
+function getAcademicPlatformLabel(
+  platform?: AcademicPlatformCode | null,
+  options: AcademicPlatformOption[] = fallbackAcademicPlatformOptions,
+) {
+  const matched = options.find((item) => item.code === platform);
+  return matched ? matched.label : genericPlatformLabel;
 }
 
 function rewriteSample(raw: string, variant: Exclude<WorkbenchVariant, "detect">) {
   const base = raw
-    .replaceAll("Artificial intelligence", "The landscape of academic writing")
-    .replaceAll("Students increasingly", "An increasing number of students");
+    .replaceAll("人工智能", "学术写作生态")
+    .replaceAll("学生越来越多地", "越来越多学生");
 
   return variant === "reduce-repeat"
-    ? `${base} As a result, universities must establish clear governance mechanisms that preserve original analysis and disciplinary judgment.`
-    : `${base} However, excessive reliance on these tools can bring strong stylistic signals that are easy to detect, so writers should emphasize revision quality and transparent supervision.`;
+    ? `${base} 因此，高校需要建立明确治理机制，保障原创分析与学科判断。`
+    : `${base} 但过度依赖这类工具会产生明显且易被识别的风格信号，写作者应强化人工修订质量与过程透明性。`;
 }
 
 function buildMockUploadUrl(file: File) {
@@ -227,8 +206,14 @@ function extractOriginalPreview(content: string) {
   return cleaned || normalized || "暂无内容";
 }
 
-function toHistoryItem(task: TaskListItem, fallbackPlatform: string): HistoryItem {
-  const storedPlatform = task.payload.platform ? getAcademicPlatformLabel(task.payload.platform) : extractLineValue(task.payload.content, "平台");
+function toHistoryItem(
+  task: TaskListItem,
+  fallbackPlatform: string,
+  platformOptions: AcademicPlatformOption[],
+): HistoryItem {
+  const storedPlatform = task.payload.platform
+    ? getAcademicPlatformLabel(task.payload.platform, platformOptions)
+    : extractLineValue(task.payload.content, "平台");
   return {
     id: task.id,
     createdLabel: formatCreatedLabel(task.createdAt),
@@ -278,12 +263,13 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
   const copy = copyMap[variant];
   const isDetectVariant = variant === "detect";
   const requiresAcademicPlatform = variant === "reduce-repeat" || variant === "reduce-ai" || isDetectVariant;
-  const platformOptions = requiresAcademicPlatform ? academicPlatformOptions : [];
+
   const historySectionId = `${variant}-history`;
 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>("text");
   const [platform, setPlatform] = useState<AcademicPlatformCode>(defaultAcademicPlatform);
+  const [platformOptions, setPlatformOptions] = useState<AcademicPlatformOption[]>(fallbackAcademicPlatformOptions);
   const [sourceText, setSourceText] = useState("");
   const [paperTitle, setPaperTitle] = useState("");
   const [authorName, setAuthorName] = useState("");
@@ -321,8 +307,9 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
   }, [detectScore]);
 
   const remainingFreeDetect = Math.max(dailyDetectLimit - dailyDetectUsed, 0);
-  const currentPlatformLabel = requiresAcademicPlatform ? getAcademicPlatformLabel(platform) : genericPlatformLabel;
-  const resultSourcePreview = inputMode === "upload" ? `文件：${uploadedFiles[0]?.name || "未上传"}` : sourceText.trim();
+  const currentPlatformLabel = requiresAcademicPlatform
+    ? getAcademicPlatformLabel(platform, platformOptions)
+    : genericPlatformLabel;
 
   const loadAccountData = useCallback(async () => {
     const session = getValidSession();
@@ -364,18 +351,43 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
             .filter((item) => item.type === variant)
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
             .slice(0, 5)
-            .map((item) => toHistoryItem(item, currentPlatformLabel));
+            .map((item) => toHistoryItem(item, currentPlatformLabel, platformOptions));
           setHistoryEntries(nextHistory);
         }
       }
     } catch {
       // keep screen usable
     }
-  }, [currentPlatformLabel, isDetectVariant, variant]);
+  }, [currentPlatformLabel, isDetectVariant, platformOptions, variant]);
 
   useEffect(() => {
     void loadAccountData();
   }, [loadAccountData]);
+
+  useEffect(() => {
+    if (!requiresAcademicPlatform) return;
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch(toApiUrl(`/api/v1/platforms?taskType=${encodeURIComponent(variant)}`), {
+          method: "GET",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as PlatformListResponse;
+        if (!Array.isArray(data.items) || data.items.length === 0) return;
+
+        setPlatformOptions(data.items);
+        setPlatform((current) => (data.items.some((item) => item.code === current) ? current : data.items[0].code));
+      } catch {
+        // keep fallback options
+      }
+    })();
+
+    return () => controller.abort();
+  }, [requiresAcademicPlatform, variant]);
 
   useEffect(() => () => pollingAbortRef.current?.abort(), []);
 
@@ -711,7 +723,7 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `${variant}-result.txt`;
+    anchor.download = `${variant}-结果.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -728,7 +740,7 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
         <section className="dashboard-card overflow-hidden px-6 py-7">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6f78f7]">AIGC Detector</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6f78f7]">AIGC检测</p>
               <h1 className="mt-3 text-[30px] font-semibold tracking-[-0.03em] text-[#1f2436]">{copy.pageTitle}</h1>
               <p className="mt-3 max-w-3xl text-sm leading-7 text-[#67708a]">{copy.pageDesc}</p>
             </div>
@@ -1118,13 +1130,7 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
                       正在生成改写结果...
                     </div>
                   ) : resultText ? (
-                    inputMode === "text" ? (
-                      <div className="h-full overflow-hidden rounded-lg border border-[#e6eaf5]">
-                        <ReactDiffViewer oldValue={resultSourcePreview} newValue={resultText} splitView hideLineNumbers styles={diffStyles} />
-                      </div>
-                    ) : (
-                      <div className="h-full rounded-lg border border-[#e6eaf5] bg-[#fcfcff] px-4 py-4 text-sm leading-7 text-[#565d76]">{resultText}</div>
-                    )
+                    <div className="h-full rounded-lg border border-[#e6eaf5] bg-[#fcfcff] px-4 py-4 text-sm leading-7 text-[#565d76]">{resultText}</div>
                   ) : (
                     <div className="flex h-full flex-col items-center justify-center text-center text-sm text-[#8b92a7]">
                       <p>提交任务后，这里会显示改写结果。</p>
@@ -1170,11 +1176,11 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
 
                 <div className="grid gap-4 lg:grid-cols-2">
                   <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa0b3]">Original</p>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa0b3]">原文</p>
                     <div className="min-h-[120px] rounded-lg border border-[#e7eaf3] bg-white px-4 py-3 text-sm leading-7 text-[#565d76]">{trimPreview(item.original)}</div>
                   </div>
                   <div>
-                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa0b3]">Generated</p>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[#9aa0b3]">结果</p>
                     <div className="min-h-[120px] rounded-lg border border-[#e7eaf3] bg-white px-4 py-3 text-sm leading-7 text-[#565d76]">
                       {item.status === "processing" ? "任务处理中，请稍后刷新查看结果。" : item.status === "failed" ? "任务未完成，请重试。" : trimPreview(item.result)}
                     </div>
@@ -1192,3 +1198,6 @@ export function FeatureWorkbench({ variant }: FeatureWorkbenchProps) {
     </div>
   );
 }
+
+
+

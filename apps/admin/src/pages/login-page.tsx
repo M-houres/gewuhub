@@ -1,8 +1,7 @@
-import { Button, Card, Form, Input, Typography, message } from "antd";
+﻿import { Button, Card, Form, Input, Typography, message } from "antd";
 import { useState } from "react";
 import { saveAdminSession } from "../lib/admin-auth";
 import { apiBase } from "../lib/api";
-import { useAdminLocale } from "../lib/locale";
 
 type LoginPageProps = {
   onSuccess: () => void;
@@ -26,11 +25,10 @@ async function parseErrorMessage(response: Response) {
     if (data?.message) return data.message;
   }
   const text = await response.text().catch(() => "");
-  return text || `request failed: ${response.status}`;
+  return text || `请求失败：${response.status}`;
 }
 
 export function LoginPage({ onSuccess }: LoginPageProps) {
-  const { pick } = useAdminLocale();
   const [loading, setLoading] = useState(false);
   const [msgApi, contextHolder] = message.useMessage();
 
@@ -56,10 +54,10 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
         expiresAt: data.expiresAt,
         username: data.username,
       });
-      msgApi.success(pick("登录成功", "Login successful"));
+      msgApi.success("登录成功");
       onSuccess();
     } catch {
-      msgApi.error(pick("登录时发生网络错误", "Network error while logging in"));
+      msgApi.error("登录时发生网络错误");
     } finally {
       setLoading(false);
     }
@@ -79,29 +77,29 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
       {contextHolder}
       <Card style={{ width: 420, borderRadius: 14 }}>
         <Typography.Title level={4} style={{ marginBottom: 8 }}>
-          {pick("Gewu 管理后台登录", "Gewu Admin Login")}
+          Gewu 管理后台登录
         </Typography.Title>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 20 }}>
-          {pick("登录后即可访问用户、订单与模型管理能力。", "Sign in to access user, order, and model management.")}
+          登录后可访问用户、订单、模型和系统配置管理能力。
         </Typography.Paragraph>
 
         <Form<LoginFormValues> layout="vertical" onFinish={(values) => void onFinish(values)}>
           <Form.Item
-            label={pick("用户名", "Username")}
+            label="用户名"
             name="username"
-            rules={[{ required: true, message: pick("请输入用户名", "Please enter username") }]}
+            rules={[{ required: true, message: "请输入用户名" }]}
           >
             <Input autoComplete="username" />
           </Form.Item>
           <Form.Item
-            label={pick("密码", "Password")}
+            label="密码"
             name="password"
-            rules={[{ required: true, message: pick("请输入密码", "Please enter password") }]}
+            rules={[{ required: true, message: "请输入密码" }]}
           >
             <Input.Password autoComplete="current-password" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block loading={loading}>
-            {pick("登录", "Sign In")}
+            登录
           </Button>
         </Form>
       </Card>

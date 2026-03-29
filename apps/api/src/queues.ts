@@ -15,7 +15,9 @@ export type DocxProcessingJobPayload = {
   sourceFileUrl: string;
   sourceFileName?: string;
   sourceFileSizeBytes?: number;
-  sourceExtension?: string;
+  sourceExtension?: string; 
+  sourceFileBase64?: string; 
+  documentText?: string; 
   mode: "deai" | "rewrite" | "detect";
 };
 

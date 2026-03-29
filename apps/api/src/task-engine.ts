@@ -1,6 +1,7 @@
 import { defaultAcademicPlatform, getAcademicPlatformLabel, normalizeAcademicPlatform, type AcademicPlatform } from "./academic-platforms";
+import { detectCnkiV3Document } from "./cnki-detect-v3";
 import type { DetectDistributionBucket, DetectFragmentRecord, DetectHighlightKind, DetectMetricRecord, DetectReportModel } from "./detect-report-model";
-import { getAlgorithmEngineSettings, getTaskExecutionSettings, type TaskExecutionMode } from "./system-settings";
+import { getAlgorithmEngineSettings, getAlgorithmSlot, getTaskExecutionSettings, type DetectAlgorithmSlot, type RewriteAlgorithmSlot, type TaskExecutionMode } from "./system-settings";
 import { rewriteAcademicContent } from "./rewrite-engine";
 
 type RewriteVariant = "reduce-repeat" | "reduce-ai";
@@ -12,6 +13,7 @@ export type TaskEngineInput = {
   mode: string;
   provider: string;
   modelId: string;
+  modelHasApiKey?: boolean;
   platform?: AcademicPlatform;
 };
 
@@ -428,6 +430,75 @@ function countPhraseHits(text: string, phrases: string[]) {
   return phrases.reduce((sum, phrase) => sum + (text.match(buildPhrasePattern(phrase)) || []).length, 0);
 }
 
+function applyConfiguredRewriteReplacements(text: string, slot: RewriteAlgorithmSlot) {
+  if (!slot.enabled || slot.replacements.length === 0) {
+    return text;
+  }
+
+  return slot.replacements.reduce((output, rule) => {
+    const from = rule.from.trim();
+    if (!from) return output;
+    return output.replace(buildPhrasePattern(from), rule.to);
+  }, text);
+}
+
+function mergeProtectedTerms(baseTerms: string[], slot: RewriteAlgorithmSlot) {
+  const merged = [...baseTerms, ...(slot.enabled ? slot.protectedTerms : [])]
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return Array.from(new Set(merged));
+}
+
+function applyDetectSlotAdjustments(raw: string, report: DetectReportModel, slot: DetectAlgorithmSlot) {
+  const next: DetectReportModel = {
+    ...report,
+    metrics: [...report.metrics],
+    notes: [...report.notes],
+    methodology: [...report.methodology],
+  };
+
+  if (!slot.enabled) {
+    next.notes.push(`Rule slot ${slot.version} is disabled; default detect algorithm output kept.`);
+    return next;
+  }
+
+  let delta = slot.scoreOffset;
+  const adjustmentItems: string[] = [];
+
+  if (slot.scoreOffset !== 0) {
+    adjustmentItems.push(`base:${slot.scoreOffset >= 0 ? "+" : ""}${slot.scoreOffset}`);
+  }
+
+  for (const rule of slot.phraseWeights) {
+    const hits = countPhraseHits(raw, [rule.phrase]);
+    if (hits <= 0) continue;
+    const contribution = roundTo(hits * rule.weight, 2);
+    delta += contribution;
+    adjustmentItems.push(`${rule.phrase} x${hits} (${contribution >= 0 ? "+" : ""}${contribution})`);
+  }
+
+  if (delta !== 0) {
+    const adjustedScore = clampNumber(roundTo(next.overallScore + delta, 2), 0, 100);
+    next.overallScore = adjustedScore;
+    next.overallScoreDisplay = formatPercent(adjustedScore);
+  }
+
+  if (adjustmentItems.length > 0) {
+    next.metrics.push({
+      label: "slotAdjustments:",
+      value: `${delta >= 0 ? "+" : ""}${roundTo(delta, 2)} (${adjustmentItems.join("; ")})`,
+    });
+  }
+
+  next.methodology.push(`Configured detect slot: ${slot.version}`);
+  if (slot.notes.length > 0) {
+    next.notes.push(...slot.notes);
+  }
+  next.notes.push(`Rule slot version: ${slot.version}`);
+
+  return next;
+}
+
 function countCitationHits(text: string) {
   return (text.match(/(\[[0-9,\s-]+\]|\([A-Z][A-Za-z]+,\s*\d{4}\))/g) || []).length;
 }
@@ -567,114 +638,35 @@ function buildGenericDetectAnalysis(
   };
 }
 
-const cnkiAbstractPhrases = [
-  "具有重要意义",
-  "有效路径",
-  "系统推进",
-  "综合素养",
-  "现实意义",
-  "值得关注",
-  "总体来看",
-  "综上可见",
-  "进一步探讨",
-  "多维度",
-  "协同推进",
-  "内在逻辑",
-  "奠定坚实基础",
-];
+function cnkiRiskToHighlight(risk: "none" | "low" | "medium" | "high"): DetectHighlightKind {
+  if (risk === "high") return "significant";
+  if (risk === "medium" || risk === "low") return "suspected";
+  return "neutral";
+}
 
 function buildCnkiDetectAnalysis(raw: string, meta: DetectAlgorithmContext["meta"] & { taskId: string }): DetectReportModel {
   const source = normalizeText(raw);
-  const sentences = splitSentences(source);
-  const tokens = tokenize(source);
-  const totalChars = Math.max(1, source.replace(/\s+/g, "").length);
-  const uniqueRatio = tokens.length > 0 ? new Set(tokens.map((item) => item.toLowerCase())).size / tokens.length : 1;
-  const sentenceLengths = sentences.map((item) => item.length);
-  const averageSentenceLength = average(sentenceLengths);
-  const sentenceStdDev = Math.sqrt(calculateVariance(sentenceLengths));
-  const genericHitCount = countPhraseHits(source, genericAcademicPhrases);
-  const connectorHitCount = countPhraseHits(source, connectorTokens);
-  const abstractClaimHits = countPhraseHits(source, cnkiAbstractPhrases);
-  const citationHitCount = countCitationHits(source);
-  const numericAnchorHits = (source.match(/\d+(?:\.\d+)?[%％年项例次个]/gu) || []).length;
-  const quoteAnchorHits = (source.match(/“[^”]{2,40}”|《[^》]{2,40}》/gu) || []).length;
-  const evidenceAnchorHits = citationHitCount + numericAnchorHits + quoteAnchorHits;
+  const analysis = detectCnkiV3Document(source);
+  const totalChars = Math.max(1, analysis.summary.totalChars || source.replace(/\s+/g, "").length);
 
-  const languagePatternRisk = clampNumber(
-    10 +
-      genericHitCount * 4.6 +
-      connectorHitCount * 3.4 +
-      clampNumber((0.56 - uniqueRatio) * 85, 0, 24) +
-      (sentences.length >= 3 && sentenceStdDev < Math.max(6, averageSentenceLength * 0.2) ? 12 : 0),
-    3,
-    98,
-  );
-
-  const semanticLogicRisk = clampNumber(
-    12 +
-      abstractClaimHits * 5.2 +
-      (evidenceAnchorHits === 0 && totalChars > 200 ? 18 : 0) +
-      clampNumber((0.52 - uniqueRatio) * 90, 0, 18) +
-      (averageSentenceLength > 38 ? 8 : 0),
-    4,
-    98,
-  );
-
-  const overallScore = roundTo(
-    clampNumber(
-      languagePatternRisk * 0.52 +
-        semanticLogicRisk * 0.48 -
-        Math.min(12, evidenceAnchorHits * 1.8) -
-        Math.min(8, citationHitCount * 2.2),
-      2,
-      98,
-    ),
-    1,
-  );
-
-  const fragments: DetectFragmentRecord[] = sentences.map((sentence, index) => {
-    const sentenceGenericHits = countPhraseHits(sentence, genericAcademicPhrases);
-    const sentenceConnectorHits = countPhraseHits(sentence, connectorTokens);
-    const sentenceAbstractHits = countPhraseHits(sentence, cnkiAbstractPhrases);
-    const sentenceEvidenceHits =
-      countPhraseHits(sentence, ["“", "《"]) +
-      (sentence.match(/\d+(?:\.\d+)?[%％年项例次个]/gu) || []).length +
-      countCitationHits(sentence);
-
-    const sentenceLanguageRisk = clampNumber(
-      12 +
-        sentenceGenericHits * 9 +
-        sentenceConnectorHits * 6 +
-        (sentence.length > 56 ? 10 : 3) +
-        (sentence.length < 12 ? -6 : 0),
-      3,
-      96,
-    );
-
-    const sentenceSemanticRisk = clampNumber(
-      10 + sentenceAbstractHits * 11 + (sentenceEvidenceHits === 0 && sentence.length > 42 ? 16 : 0),
-      2,
-      94,
-    );
-
-    const sentenceScore = roundTo(
-      clampNumber(sentenceLanguageRisk * 0.5 + sentenceSemanticRisk * 0.5 - sentenceEvidenceHits * 5.5, 0, 99),
-      1,
-    );
-    const highlight: DetectHighlightKind = sentenceScore >= 68 ? "significant" : sentenceScore >= 45 ? "suspected" : "neutral";
+  const fragments: DetectFragmentRecord[] = analysis.paragraphs.map((paragraph, index) => {
+    const score = roundTo(paragraph.score * 100, 1);
+    const highlight = cnkiRiskToHighlight(paragraph.riskLevel);
 
     return {
-      id: `cnki-fragment-${index + 1}`,
+      id: `cnki-paragraph-${index + 1}`,
       title: `片段${index + 1}`,
-      text: sentence,
-      charCount: sentence.replace(/\s+/g, "").length,
-      score: sentenceScore,
-      scoreDisplay: toPercentDisplay(sentenceScore),
+      text: paragraph.text,
+      charCount: paragraph.charCount,
+      score,
+      scoreDisplay: toPercentDisplay(score),
       highlight,
       highlightLabel: highlightLabel(highlight, "cnki"),
       metrics: [
-        { label: "语言模式：", value: toPercentDisplay(sentenceLanguageRisk) },
-        { label: "语义逻辑：", value: toPercentDisplay(sentenceSemanticRisk) },
+        { label: "F1词汇层", value: paragraph.breakdown.f1Lexical.toFixed(2) },
+        { label: "F2短语层", value: paragraph.breakdown.f2Phrase.toFixed(2) },
+        { label: "F3句法层", value: paragraph.breakdown.f3Structural.toFixed(2) },
+        { label: "密度乘数", value: paragraph.densityMultiplier.toFixed(2) },
       ],
     };
   });
@@ -685,13 +677,15 @@ function buildCnkiDetectAnalysis(raw: string, meta: DetectAlgorithmContext["meta
   const suspectedChars = fragments
     .filter((item) => item.highlight === "suspected")
     .reduce((sum, item) => sum + item.charCount, 0);
+
   const aiFeatureValue = roundTo((significantChars / totalChars) * 100, 1);
+  const paragraphScoreDisplay = toPercentDisplay(analysis.score * 100);
 
   return {
     platform: "cnki",
     platformLabel: getAcademicPlatformLabel("cnki"),
     reportTitle: "AIGC检测 · 全文报告单",
-    reportSubtitle: "参考知网公开报告结构生成",
+    reportSubtitle: "知网规则引擎 v3（词汇+短语+句法+密度）",
     reportNo: buildDetectReportNo("cnki", meta.taskId),
     generatedAt: formatTimestamp(meta.generatedAt),
     documentTitle: meta.documentTitle || "未命名文档",
@@ -708,29 +702,29 @@ function buildCnkiDetectAnalysis(raw: string, meta: DetectAlgorithmContext["meta
     suspectedLabel: "AI特征疑似字符数",
     neutralLabel: "未标识部分",
     metrics: [
-      { label: "语言模式风险值：", value: toPercentDisplay(languagePatternRisk) },
-      { label: "语义逻辑风险值：", value: toPercentDisplay(semanticLogicRisk) },
-      { label: "AI特征字符数：", value: String(significantChars) },
-      { label: "总字符数：", value: String(totalChars) },
-      { label: "引用 / 数值锚点：", value: String(evidenceAnchorHits) },
+      { label: "段落加权综合概率", value: paragraphScoreDisplay },
+      { label: "风险等级", value: analysis.riskLevel },
+      { label: "高风险段落数", value: String(analysis.summary.highRiskParagraphs) },
+      { label: "命中高频词", value: analysis.summary.topHitWords.slice(0, 8).join("、") || "无" },
+      { label: "AI特征字符数", value: String(significantChars) },
+      { label: "总字符数", value: String(totalChars) },
     ],
     distribution: createDistributionBuckets(source, fragments, "cnki"),
     fragments: fragments
-      .filter((item) => item.highlight === "significant" || item.highlight === "suspected")
+      .filter((item) => item.highlight !== "neutral")
       .sort((left, right) => right.score - left.score)
       .slice(0, 8),
     methodology: [
-      "This CNKI branch is a public-information-based simulation, not a reverse-engineered official implementation.",
-      "It combines a language-pattern chain and a semantic-logic chain, then discounts risk when citations, numbers, and concrete knowledge anchors are present.",
-      "Only the 'significant' portion is counted into AI feature chars, matching the public CNKI report convention.",
+      "规则来源：aigc_detection_engine_spec_v3（段落级评分）。",
+      "特征层：F1词汇特征 + F2短语特征 + F3句法结构特征。",
+      "惩罚层：段落命中密度乘数 + 句子级密度惩罚 + 全文跨段落密度加成。",
+      "总分：按段落字数加权求和，输出风险分层与命中明细。",
     ],
     notes: [
-      "说明：支持中、英文内容检测。",
-      "说明：AI特征值 = AI特征字符数 / 总字符数。",
-      "说明：红色代表AI特征显著部分，计入AI特征字符数；棕色代表AI特征疑似部分，未计入AI特征字符数。",
-      "说明：检测结果仅供参考，最终应结合人工复核和具体机构政策综合判断。",
+      "说明：AI特征值 = 高风险段落字符数 / 全文字符数。",
+      "说明：检测结果用于辅助判定，仍需结合人工复核。",
     ],
-    summary: "本分支基于公开资料抽象出“语言模式 + 语义逻辑”双链路，并按知网公开报告口径展示 AI 特征值。",
+    summary: "当前知网分支已切换为 v3 规则引擎，报告字段与前端展示结构保持兼容。",
   };
 }
 
@@ -1152,13 +1146,35 @@ const detectAlgorithms: Record<AcademicPlatform, (input: DetectAlgorithmContext)
   },
 };
 
-function hasLiveModelExecution(_provider: string, _modelId: string) {
-  return false;
+const liveProviderApiKeyEnv: Record<string, string> = {
+  deepseek: "DEEPSEEK_API_KEY",
+  qwen: "QWEN_API_KEY",
+  ernie: "ERNIE_API_KEY",
+  glm: "GLM_API_KEY",
+  spark: "SPARK_API_KEY",
+  openai: "OPENAI_API_KEY",
+  anthropic: "ANTHROPIC_API_KEY",
+  gemini: "GEMINI_API_KEY",
+};
+
+function hasLiveModelExecution(provider: string, modelId: string, modelHasApiKey?: boolean) {
+  void modelId;
+  if (modelHasApiKey) return true;
+  const envKey = liveProviderApiKeyEnv[provider.toLowerCase()];
+  if (!envKey) return false;
+  const secret = process.env[envKey];
+  return typeof secret === "string" && secret.trim().length > 0;
 }
 
-function resolveExecutionMode(taskType: string, platform: AcademicPlatform, provider: string, modelId: string) {
+function resolveExecutionMode(
+  taskType: string,
+  platform: AcademicPlatform,
+  provider: string,
+  modelId: string,
+  modelHasApiKey?: boolean,
+) {
   const executionSettings = getTaskExecutionSettings(taskType, platform);
-  const liveModelAvailable = hasLiveModelExecution(provider, modelId);
+  const liveModelAvailable = hasLiveModelExecution(provider, modelId, modelHasApiKey);
   const configuredMode = executionSettings.configuredMode;
 
   let effectiveMode: TaskExecutionMode = configuredMode;
@@ -1178,6 +1194,8 @@ function resolveExecutionMode(taskType: string, platform: AcademicPlatform, prov
     effectiveMode,
     liveModelAvailable,
     fallbackToRulesOnModelError: executionSettings.fallbackToRulesOnModelError,
+    slotEnabled: executionSettings.slotEnabled,
+    slotVersion: executionSettings.slotVersion,
     fallbackApplied,
     fallbackReason,
   };
@@ -1211,9 +1229,10 @@ export function buildTaskResult(input: TaskEngineInput) {
   const parsed = parseStructuredContent(input.content);
   const baseText = parsed.primaryText;
   const platform = normalizeAcademicPlatform(input.platform || parsed.platform || defaultAcademicPlatform);
-  const execution = resolveExecutionMode(input.taskType, platform, input.provider, input.modelId);
+  const execution = resolveExecutionMode(input.taskType, platform, input.provider, input.modelId, input.modelHasApiKey);
 
   if (input.taskType === "detect") {
+    const detectSlot = getAlgorithmSlot("detect", platform) as DetectAlgorithmSlot;
     const detectResult = detectAlgorithms[platform]({
       taskId: input.taskId,
       raw: baseText,
@@ -1225,22 +1244,28 @@ export function buildTaskResult(input: TaskEngineInput) {
         fileName: parsed.fileName || undefined,
       },
     });
+    const adjustedReport = applyDetectSlotAdjustments(baseText, detectResult.report, detectSlot);
+
     return {
-      output: detectResult.output,
+      output: formatDetectReportOutput(adjustedReport),
       outputUrl: buildOutputUrl(input.taskType, input.taskId),
-      report: detectResult.report,
+      report: adjustedReport,
       execution,
     };
   }
 
   if (input.taskType === "reduce-repeat" || input.taskType === "reduce-ai") {
-    const extraProtectedTerms = [parsed.title, parsed.subject, parsed.discipline].filter((item) => item && item.trim().length > 0);
+    const rewriteSlot = getAlgorithmSlot(input.taskType, platform) as RewriteAlgorithmSlot;
+    const baseProtectedTerms = [parsed.title, parsed.subject, parsed.discipline].filter((item) => item && item.trim().length > 0);
+    const extraProtectedTerms = mergeProtectedTerms(baseProtectedTerms, rewriteSlot);
+    const rewritten = rewriteAlgorithms[platform]({
+      raw: baseText,
+      variant: input.taskType,
+      extraProtectedTerms,
+    });
+
     return {
-      output: rewriteAlgorithms[platform]({
-        raw: baseText,
-        variant: input.taskType,
-        extraProtectedTerms,
-      }),
+      output: applyConfiguredRewriteReplacements(rewritten, rewriteSlot),
       outputUrl: buildOutputUrl(input.taskType, input.taskId),
       execution,
     };
@@ -1268,3 +1293,13 @@ export function generateModelOutput(input: { provider: string; modelId: string; 
 
   return buildLongformDraft(taskType, input.prompt, input.provider, input.modelId);
 }
+
+
+
+
+
+
+
+
+
+

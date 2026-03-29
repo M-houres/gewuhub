@@ -1,4 +1,11 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
+
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const docxFixturePath = path.join(rootDir, "research", "fixtures", "sample-academic.docx");
 
 const apiBase = process.env.SMOKE_API_BASE || "http://127.0.0.1:4000";
 const pollIntervalMs = Number(process.env.SMOKE_TASK_POLL_INTERVAL_MS || 2000);
@@ -105,7 +112,7 @@ async function createTask(token) {
   return response.payload.taskId;
 }
 
-async function submitDocxTask(token, taskId) {
+async function submitDocxTask(token, taskId, sourceFileBase64) {
   const response = await request("/api/v1/tasks/docx", {
     method: "POST",
     headers: {
@@ -117,6 +124,7 @@ async function submitDocxTask(token, taskId) {
       sourceFileUrl: "https://mock-oss.gewu.local/uploads/docx-smoke.docx",
       sourceFileName: "docx-smoke.docx",
       sourceFileSizeBytes: 4096,
+      sourceFileBase64,
       mode: "rewrite",
     }),
   });
@@ -178,15 +186,49 @@ async function pollDocxProgress(token, taskId) {
 
 async function main() {
   const { token } = await registerAndLogin("smoke_docx");
+  const fixtureDocx = await readFile(docxFixturePath);
+  const sourceFileBase64 = fixtureDocx.toString("base64");
   const taskId = await createTask(token);
-  const submitPayload = await submitDocxTask(token, taskId);
+  const submitPayload = await submitDocxTask(token, taskId, sourceFileBase64);
   const submitStatus = submitPayload?.status;
-  const repeatedSubmit = await submitDocxTask(token, taskId);
+  const repeatedSubmit = await submitDocxTask(token, taskId, sourceFileBase64);
   ensure(repeatedSubmit?.idempotent === true, "repeated docx submit should be idempotent");
   const result = await pollDocxProgress(token, taskId);
   ensure(result.progressPayload?.mode === "rewrite", "docx progress should expose rewrite mode");
   ensure(result.progressPayload?.queueStrategy === "local", "docx progress should expose local queue strategy");
   ensure(result.progressPayload?.sourceFileName === "docx-smoke.docx", "docx progress should expose source file name");
+
+  const downloadLinkResponse = await request(`/api/v1/tasks/${taskId}/download-link`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  ensure(downloadLinkResponse.status === 200, `download link request failed: ${downloadLinkResponse.status}`);
+  ensure(typeof downloadLinkResponse.payload?.downloadPath === "string", "download link response missing ticket path");
+
+  const ticketResolveResponse = await request(downloadLinkResponse.payload.downloadPath, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  ensure(ticketResolveResponse.status === 200, `download ticket resolve failed: ${ticketResolveResponse.status}`);
+  ensure(typeof ticketResolveResponse.payload?.downloadUrl === "string", "download ticket response missing generated download URL");
+  ensure(ticketResolveResponse.payload.downloadUrl.includes(".docx"), "docx upload should resolve to .docx generated download URL");
+
+  const generatedFileResponse = await fetch(`${apiBase}${ticketResolveResponse.payload.downloadUrl}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  ensure(generatedFileResponse.status === 200, `generated file fetch failed: ${generatedFileResponse.status}`);
+  const generatedFileContentType = generatedFileResponse.headers.get("content-type") || "";
+  ensure(
+    generatedFileContentType.includes("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+    "docx download should return docx content-type",
+  );
 
   console.log(
     JSON.stringify(
@@ -202,6 +244,7 @@ async function main() {
           "local fallback mode keeps docx progress polling available",
           "docx progress endpoint exposes mode and queue strategy metadata",
           "docx task completes with downloadable result without Redis",
+          "docx upload returns .docx download URL and content-type",
         ],
       },
       null,
@@ -224,3 +267,10 @@ main().catch((error) => {
   );
   process.exit(1);
 });
+
+
+
+
+
+
+
